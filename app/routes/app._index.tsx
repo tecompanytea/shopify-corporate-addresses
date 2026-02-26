@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -211,17 +212,14 @@ const CUSTOMER_PICKER_STYLES = `
 }
 
 .customer-picker__menu {
-  position: absolute;
-  inset-inline-start: 0;
-  inset-inline-end: 0;
-  top: calc(100% + 4px);
-  z-index: 9999;
+  position: fixed;
+  z-index: 2147483647;
   background: var(--p-color-bg-surface, #fff);
   border: 1px solid var(--p-color-border, #d1d5db);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   overflow: hidden;
-  max-height: 320px;
+  max-height: min(320px, calc(100vh - 24px));
 }
 
 .customer-picker__list {
@@ -490,9 +488,17 @@ export default function Index() {
   const [reportOrders, setReportOrders] = useState<ShippingReportOrder[]>([]);
   const [reportNotice, setReportNotice] = useState("");
   const [reportError, setReportError] = useState("");
+  const [customerMenuRect, setCustomerMenuRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const createCustomerModalRef = useRef<HTMLElementTagNameMap["s-modal"] | null>(
     null,
   );
+  const customerFieldRef = useRef<
+    HTMLElementTagNameMap["s-search-field"] | null
+  >(null);
   const customerBlurTimeoutRef = useRef<number | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
@@ -593,6 +599,7 @@ export default function Index() {
     setCreateCustomerLastNameInput("");
     setCreateCustomerEmailInput("");
     setIsCustomerDropdownOpen(false);
+    setCustomerMenuRect(null);
     createCustomerModalRef.current?.hideOverlay?.();
   }, [customerCreateFetcher.data]);
 
@@ -611,6 +618,24 @@ export default function Index() {
       window.clearTimeout(timeout);
     };
   }, [customerInputValue]);
+
+  useEffect(() => {
+    if (!isCustomerDropdownOpen) return;
+
+    updateCustomerMenuPosition();
+
+    const onWindowChange = () => {
+      updateCustomerMenuPosition();
+    };
+
+    window.addEventListener("resize", onWindowChange);
+    window.addEventListener("scroll", onWindowChange, true);
+
+    return () => {
+      window.removeEventListener("resize", onWindowChange);
+      window.removeEventListener("scroll", onWindowChange, true);
+    };
+  }, [isCustomerDropdownOpen, customerInputValue]);
 
   useEffect(() => {
     return () => {
@@ -636,6 +661,18 @@ export default function Index() {
       })
       .slice(0, 50);
   }, [customerInputValue, customerOptions]);
+
+  const updateCustomerMenuPosition = () => {
+    const field = customerFieldRef.current;
+    if (!field) return;
+
+    const rect = field.getBoundingClientRect();
+    setCustomerMenuRect({
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+    });
+  };
 
   const previewRows = useMemo(
     () => parseResult?.previewRows.slice(0, 5) ?? [],
@@ -689,6 +726,7 @@ export default function Index() {
     const value = target.value || "";
     setCustomerInputValue(value);
     setIsCustomerDropdownOpen(true);
+    updateCustomerMenuPosition();
     setCustomerError("");
     setCustomerMessage("");
 
@@ -708,6 +746,7 @@ export default function Index() {
       customerBlurTimeoutRef.current = null;
     }
     setIsCustomerDropdownOpen(true);
+    updateCustomerMenuPosition();
   };
 
   const onCustomerFieldBlur = () => {
@@ -717,6 +756,7 @@ export default function Index() {
 
     customerBlurTimeoutRef.current = window.setTimeout(() => {
       setIsCustomerDropdownOpen(false);
+      setCustomerMenuRect(null);
       customerBlurTimeoutRef.current = null;
     }, 120);
   };
@@ -725,6 +765,7 @@ export default function Index() {
     setSelectedCustomerId(customer.id);
     setCustomerInputValue(formatCustomerOption(customer));
     setIsCustomerDropdownOpen(false);
+    setCustomerMenuRect(null);
     setCustomerError("");
     setCustomerMessage("");
   };
@@ -738,6 +779,7 @@ export default function Index() {
     setCustomerError("");
     setCustomerMessage("");
     setIsCustomerDropdownOpen(false);
+    setCustomerMenuRect(null);
     createCustomerModalRef.current?.showOverlay?.();
   };
 
@@ -960,6 +1002,7 @@ export default function Index() {
               <s-stack direction="block" gap="base">
                 <div className="customer-picker">
                   <s-search-field
+                    ref={customerFieldRef}
                     label="Search or create a customer"
                     placeholder="Search or create a customer"
                     value={customerInputValue}
@@ -967,51 +1010,6 @@ export default function Index() {
                     onFocus={onCustomerFieldFocus}
                     onBlur={onCustomerFieldBlur}
                   />
-
-                  {isCustomerDropdownOpen ? (
-                    <div
-                      className="customer-picker__menu"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                      }}
-                    >
-                      <s-clickable
-                        onClick={onOpenCreateCustomerModal}
-                        padding="small"
-                      >
-                        <s-text type="strong">+ Create a new customer</s-text>
-                      </s-clickable>
-                      <s-divider />
-                      <div className="customer-picker__list">
-                        {filteredCustomers.length === 0 ? (
-                          <s-box padding="small">
-                            <s-text color="subdued">No matching customers.</s-text>
-                          </s-box>
-                        ) : (
-                          filteredCustomers.map((customer, index) => (
-                            <s-box key={customer.id}>
-                              <s-clickable
-                                onClick={() => onSelectCustomer(customer)}
-                                padding="small"
-                              >
-                                <s-stack direction="block" gap="none">
-                                  <s-text type="strong">
-                                    {customer.displayName}
-                                  </s-text>
-                                  <s-text color="subdued">
-                                    {customer.email || "No email"}
-                                  </s-text>
-                                </s-stack>
-                              </s-clickable>
-                              {index < filteredCustomers.length - 1 ? (
-                                <s-divider />
-                              ) : null}
-                            </s-box>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
 
                 <s-text color="subdued">
@@ -1138,6 +1136,54 @@ export default function Index() {
           </s-stack>
         </div>
       </div>
+
+      {typeof document !== "undefined" &&
+      isCustomerDropdownOpen &&
+      customerMenuRect ? (
+        createPortal(
+          <div
+            className="customer-picker__menu"
+            style={{
+              top: `${customerMenuRect.top}px`,
+              left: `${customerMenuRect.left}px`,
+              width: `${customerMenuRect.width}px`,
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+          >
+            <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
+              <s-text type="strong">+ Create a new customer</s-text>
+            </s-clickable>
+            <s-divider />
+            <div className="customer-picker__list">
+              {filteredCustomers.length === 0 ? (
+                <s-box padding="small">
+                  <s-text color="subdued">No matching customers.</s-text>
+                </s-box>
+              ) : (
+                filteredCustomers.map((customer, index) => (
+                  <s-box key={customer.id}>
+                    <s-clickable
+                      onClick={() => onSelectCustomer(customer)}
+                      padding="small"
+                    >
+                      <s-stack direction="block" gap="none">
+                        <s-text type="strong">{customer.displayName}</s-text>
+                        <s-text color="subdued">
+                          {customer.email || "No email"}
+                        </s-text>
+                      </s-stack>
+                    </s-clickable>
+                    {index < filteredCustomers.length - 1 ? <s-divider /> : null}
+                  </s-box>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body,
+        )
+      ) : null}
 
       <s-modal
         id="create-customer-modal"
