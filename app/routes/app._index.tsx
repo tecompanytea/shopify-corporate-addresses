@@ -773,89 +773,204 @@ export default function Index() {
         )
       ) : null}
 
-      <s-section heading="Upload CSV File">
-        <s-stack direction="block" gap="base">
-          <s-text color="subdued">
-            Upload a CSV file with columns: first_name, last_name, address, address2,
-            city, state, zip_code
-          </s-text>
+      <s-grid
+        gap="base"
+        gridTemplateColumns="@container (inline-size <= 900px) minmax(0, 1fr), minmax(0, 3fr) minmax(0, 2fr)"
+      >
+        <s-grid-item>
+          <s-section heading="Upload CSV File">
+            <s-stack direction="block" gap="base">
+              <s-text color="subdued">
+                Upload a CSV file with columns: first_name, last_name, address,
+                address2, city, state, zip_code
+              </s-text>
 
-          <s-drop-zone
-            label="Upload CSV"
-            accept=".csv,text/csv"
-            onInput={onDropZoneInput}
-            onDropRejected={onDropZoneRejected}
-          />
+              <s-drop-zone
+                label="Upload CSV"
+                accept=".csv,text/csv"
+                onInput={onDropZoneInput}
+                onDropRejected={onDropZoneRejected}
+              />
 
-          {fileName ? (
-            <s-text>
-              <s-text type="strong">Selected file:</s-text> {fileName}
-            </s-text>
-          ) : null}
-        </s-stack>
-      </s-section>
+              {fileName ? (
+                <s-text>
+                  <s-text type="strong">Selected file:</s-text> {fileName}
+                </s-text>
+              ) : null}
+            </s-stack>
+          </s-section>
+        </s-grid-item>
 
-      <s-section heading="Order Settings">
-        <s-stack direction="block" gap="base">
-          <s-search-field
-            label="Search or create a customer"
-            placeholder="Search or create a customer"
-            value={customerInputValue}
-            onInput={onCustomerFieldInput}
-            onFocus={onCustomerFieldFocus}
-            onBlur={onCustomerFieldBlur}
-          />
+        <s-grid-item>
+          <s-stack direction="block" gap="base">
+            <s-section heading="Order Settings">
+              <s-stack direction="block" gap="base">
+                <s-search-field
+                  label="Search or create a customer"
+                  placeholder="Search or create a customer"
+                  value={customerInputValue}
+                  onInput={onCustomerFieldInput}
+                  onFocus={onCustomerFieldFocus}
+                  onBlur={onCustomerFieldBlur}
+                />
 
-          {isCustomerDropdownOpen ? (
-            <s-box border="base" borderRadius="base" overflow="hidden">
-              <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
-                <s-text type="strong">+ Create a new customer</s-text>
-              </s-clickable>
-              <s-divider />
-              {filteredCustomers.length === 0 ? (
-                <s-box padding="small">
-                  <s-text color="subdued">No matching customers.</s-text>
-                </s-box>
-              ) : (
-                filteredCustomers.map((customer, index) => (
-                  <s-box key={customer.id}>
-                    <s-clickable
-                      onClick={() => onSelectCustomer(customer)}
-                      padding="small"
-                    >
-                      <s-stack direction="block" gap="none">
-                        <s-text type="strong">{customer.displayName}</s-text>
-                        <s-text color="subdued">
-                          {customer.email || "No email"}
-                        </s-text>
-                      </s-stack>
+                {isCustomerDropdownOpen ? (
+                  <s-box border="base" borderRadius="base" overflow="hidden">
+                    <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
+                      <s-text type="strong">+ Create a new customer</s-text>
                     </s-clickable>
-                    {index < filteredCustomers.length - 1 ? <s-divider /> : null}
+                    <s-divider />
+                    {filteredCustomers.length === 0 ? (
+                      <s-box padding="small">
+                        <s-text color="subdued">No matching customers.</s-text>
+                      </s-box>
+                    ) : (
+                      filteredCustomers.map((customer, index) => (
+                        <s-box key={customer.id}>
+                          <s-clickable
+                            onClick={() => onSelectCustomer(customer)}
+                            padding="small"
+                          >
+                            <s-stack direction="block" gap="none">
+                              <s-text type="strong">{customer.displayName}</s-text>
+                              <s-text color="subdued">
+                                {customer.email || "No email"}
+                              </s-text>
+                            </s-stack>
+                          </s-clickable>
+                          {index < filteredCustomers.length - 1 ? (
+                            <s-divider />
+                          ) : null}
+                        </s-box>
+                      ))
+                    )}
                   </s-box>
-                ))
-              )}
-            </s-box>
-          ) : null}
+                ) : null}
 
-          <s-text color="subdued">
-            Pick one company customer for all imported orders while shipping to each
-            recipient address.
-          </s-text>
+                <s-text color="subdued">
+                  Pick one company customer for all imported orders while shipping
+                  to each recipient address.
+                </s-text>
 
-          <s-text-field
-            label="Order Tags (optional)"
-            placeholder="e.g., imported, bulk-order"
-            value={orderTagsInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setOrderTagsInput(target.value || "");
-            }}
-          />
-          <s-text color="subdued">
-            Add tags to all imported orders. Separate multiple tags with commas.
-          </s-text>
-        </s-stack>
-      </s-section>
+                <s-text-field
+                  label="Order Tags (optional)"
+                  placeholder="e.g., imported, bulk-order"
+                  value={orderTagsInput}
+                  onInput={(event: Event) => {
+                    const target = event.currentTarget as HTMLElement & {
+                      value?: string;
+                    };
+                    setOrderTagsInput(target.value || "");
+                  }}
+                />
+                <s-text color="subdued">
+                  Add tags to all imported orders. Separate multiple tags with
+                  commas.
+                </s-text>
+              </s-stack>
+            </s-section>
+
+            <s-section heading="Shipping Report">
+              <s-stack gap="base" direction="block">
+                <s-text color="subdued">
+                  Search by order numbers or date range. You can also filter by
+                  tags and export the results.
+                </s-text>
+
+                <s-text-field
+                  label="Order Numbers (optional)"
+                  placeholder="e.g., #1001, #1002"
+                  value={orderNumbersInput}
+                  onInput={(event: Event) => {
+                    const target = event.currentTarget as HTMLElement & {
+                      value?: string;
+                    };
+                    setOrderNumbersInput(target.value || "");
+                  }}
+                />
+
+                <s-stack direction="inline" gap="base">
+                  <s-date-field
+                    label="Start Date (optional)"
+                    value={startDate}
+                    onInput={(event: Event) => {
+                      const target = event.currentTarget as HTMLElement & {
+                        value?: string;
+                      };
+                      setStartDate(target.value || "");
+                    }}
+                  />
+                  <s-date-field
+                    label="End Date (optional)"
+                    value={endDate}
+                    onInput={(event: Event) => {
+                      const target = event.currentTarget as HTMLElement & {
+                        value?: string;
+                      };
+                      setEndDate(target.value || "");
+                    }}
+                  />
+                </s-stack>
+
+                <s-text-field
+                  label="Tags (optional)"
+                  placeholder="e.g., imported, batch:sonya"
+                  value={searchTagsInput}
+                  onInput={(event: Event) => {
+                    const target = event.currentTarget as HTMLElement & {
+                      value?: string;
+                    };
+                    setSearchTagsInput(target.value || "");
+                  }}
+                />
+
+                <s-stack direction="inline" gap="base">
+                  <s-button
+                    variant="primary"
+                    onClick={onGenerateReport}
+                    {...(isGeneratingReport ? { loading: true } : {})}
+                  >
+                    Generate Report
+                  </s-button>
+                  <s-button
+                    onClick={onExportReport}
+                    disabled={reportOrders.length === 0}
+                  >
+                    Export to CSV
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            </s-section>
+
+            {reportOrders.length > 0 ? (
+              <s-section heading="Shipping Report Results" padding="none">
+                <s-table>
+                  <s-table-header-row>
+                    <s-table-header listSlot="primary">Order Number</s-table-header>
+                    <s-table-header listSlot="labeled">Customer Name</s-table-header>
+                    <s-table-header listSlot="labeled">
+                      Tracking Numbers
+                    </s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {reportOrders.map((order) => (
+                      <s-table-row key={order.id}>
+                        <s-table-cell>{order.name}</s-table-cell>
+                        <s-table-cell>{order.customerName}</s-table-cell>
+                        <s-table-cell>
+                          {order.trackingNumbers.length > 0
+                            ? order.trackingNumbers.join(", ")
+                            : "No tracking"}
+                        </s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+              </s-section>
+            ) : null}
+          </s-stack>
+        </s-grid-item>
+      </s-grid>
 
       <s-modal
         id="create-customer-modal"
@@ -991,94 +1106,6 @@ export default function Index() {
         </s-section>
       ) : null}
 
-      <s-section heading="Shipping Report">
-        <s-stack gap="base" direction="block">
-          <s-text color="subdued">
-            Search by order numbers or date range. You can also filter by tags and
-            export the results.
-          </s-text>
-
-          <s-text-field
-            label="Order Numbers (optional)"
-            placeholder="e.g., #1001, #1002"
-            value={orderNumbersInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setOrderNumbersInput(target.value || "");
-            }}
-          />
-
-          <s-stack direction="inline" gap="base">
-            <s-date-field
-              label="Start Date (optional)"
-              value={startDate}
-              onInput={(event: Event) => {
-                const target = event.currentTarget as HTMLElement & { value?: string };
-                setStartDate(target.value || "");
-              }}
-            />
-            <s-date-field
-              label="End Date (optional)"
-              value={endDate}
-              onInput={(event: Event) => {
-                const target = event.currentTarget as HTMLElement & { value?: string };
-                setEndDate(target.value || "");
-              }}
-            />
-          </s-stack>
-
-          <s-text-field
-            label="Tags (optional)"
-            placeholder="e.g., imported, batch:sonya"
-            value={searchTagsInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setSearchTagsInput(target.value || "");
-            }}
-          />
-
-          <s-stack direction="inline" gap="base">
-            <s-button
-              variant="primary"
-              onClick={onGenerateReport}
-              {...(isGeneratingReport ? { loading: true } : {})}
-            >
-              Generate Report
-            </s-button>
-            <s-button
-              onClick={onExportReport}
-              disabled={reportOrders.length === 0}
-            >
-              Export to CSV
-            </s-button>
-          </s-stack>
-        </s-stack>
-      </s-section>
-
-      {reportOrders.length > 0 ? (
-        <s-section heading="Shipping Report Results" padding="none">
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Order Number</s-table-header>
-              <s-table-header listSlot="labeled">Customer Name</s-table-header>
-              <s-table-header listSlot="labeled">Tracking Numbers</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {reportOrders.map((order) => (
-                <s-table-row key={order.id}>
-                  <s-table-cell>{order.name}</s-table-cell>
-                  <s-table-cell>{order.customerName}</s-table-cell>
-                  <s-table-cell>
-                    {order.trackingNumbers.length > 0
-                      ? order.trackingNumbers.join(", ")
-                      : "No tracking"}
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        </s-section>
-      ) : null}
     </s-page>
   );
 }
