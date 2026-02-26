@@ -8,7 +8,13 @@ import styles from "./styles.module.css";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  if (url.searchParams.get("shop")) {
+  const hasEmbeddedContext =
+    Boolean(url.searchParams.get("host")) ||
+    url.searchParams.get("embedded") === "1" ||
+    Boolean(url.searchParams.get("id_token")) ||
+    Boolean(url.searchParams.get("shop"));
+
+  if (hasEmbeddedContext) {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
