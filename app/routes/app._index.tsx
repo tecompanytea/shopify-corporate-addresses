@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -238,7 +237,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Index() {
   const fetcher = useFetcher<ActionData>();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [fileName, setFileName] = useState("");
   const [orderTagsInput, setOrderTagsInput] = useState("");
@@ -281,10 +279,6 @@ export default function Index() {
     setImportResult(null);
   };
 
-  const onOpenFilePicker = () => {
-    fileInputRef.current?.click();
-  };
-
   const handleSelectedFile = async (file: File) => {
     setFileName(file.name);
     setParseResult(null);
@@ -310,21 +304,19 @@ export default function Index() {
     setParseNotice("");
   };
 
-  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    await handleSelectedFile(file);
-  };
-
-  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const file = event.dataTransfer.files?.[0];
+  const onDropZoneInput = async (event: Event) => {
+    const target = event.currentTarget as (HTMLElement & { files?: File[] }) | null;
+    const file = target?.files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setParseNotice("Please upload a .csv file.");
       return;
     }
     await handleSelectedFile(file);
+  };
+
+  const onDropZoneRejected = () => {
+    setParseNotice("Please upload a .csv file.");
   };
 
   const onCreateOrders = () => {
@@ -387,36 +379,16 @@ export default function Index() {
               <code>city</code>, <code>state</code>, <code>zip_code</code>.
             </s-text>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              onChange={onFileChange}
-              style={{ display: "none" }}
-            />
-
-            <div
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={onDrop}
-              style={{
-                marginTop: "16px",
-                border: "1px dashed var(--s-border-color)",
-                borderRadius: "12px",
-                padding: "28px",
-                textAlign: "center",
-                background: "var(--s-surface-subdued)",
-              }}
-            >
-              <s-stack direction="block" gap="base" alignItems="center">
-                <s-button variant="primary" onClick={onOpenFilePicker}>
-                  Add files
-                </s-button>
-                <s-text>
-                  {fileName ? `Selected file: ${fileName}` : "Drop CSV file here"}
-                </s-text>
-                <s-text color="subdued">Accepts .csv</s-text>
-              </s-stack>
-            </div>
+            <s-stack direction="block" gap="base">
+              <s-drop-zone
+                label="Upload CSV"
+                accept=".csv,text/csv"
+                onInput={onDropZoneInput}
+                onDropRejected={onDropZoneRejected}
+              />
+              <s-text color="subdued">Accepts .csv</s-text>
+              {fileName ? <s-text>Selected file: {fileName}</s-text> : null}
+            </s-stack>
 
             {parseResult ? (
               <>
