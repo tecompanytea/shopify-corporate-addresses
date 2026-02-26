@@ -184,6 +184,22 @@ const DEFAULT_LINE_ITEM_CURRENCY = "USD";
 const DEFAULT_LINE_ITEM_QUANTITY = 1;
 
 const CUSTOMER_PICKER_STYLES = `
+.Polaris-Layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.Polaris-Layout__Section {
+  min-width: 0;
+}
+
+@container (inline-size <= 900px) {
+  .Polaris-Layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .customer-picker {
   position: relative;
 }
@@ -831,35 +847,111 @@ export default function Index() {
         )
       ) : null}
 
-      <s-grid
-        gap="base"
-        gridTemplateColumns="@container (inline-size <= 900px) minmax(0, 1fr), minmax(0, 3fr) minmax(0, 2fr)"
-      >
-        <s-grid-item>
-          <s-section heading="Upload CSV File">
-            <s-stack direction="block" gap="base">
-              <s-text color="subdued">
-                Upload a CSV file with columns: first_name, last_name, address,
-                address2, city, state, zip_code
-              </s-text>
-
-              <s-drop-zone
-                label="Upload CSV"
-                accept=".csv,text/csv"
-                onInput={onDropZoneInput}
-                onDropRejected={onDropZoneRejected}
-              />
-
-              {fileName ? (
-                <s-text>
-                  <s-text type="strong">Selected file:</s-text> {fileName}
+      <div className="Polaris-Layout">
+        <div className="Polaris-Layout__Section">
+          <s-stack direction="block" gap="base">
+            <s-section heading="Upload CSV File">
+              <s-stack direction="block" gap="base">
+                <s-text color="subdued">
+                  Upload a CSV file with columns: first_name, last_name, address,
+                  address2, city, state, zip_code
                 </s-text>
-              ) : null}
-            </s-stack>
-          </s-section>
-        </s-grid-item>
 
-        <s-grid-item>
+                <s-drop-zone
+                  label="Upload CSV"
+                  accept=".csv,text/csv"
+                  onInput={onDropZoneInput}
+                  onDropRejected={onDropZoneRejected}
+                />
+
+                {fileName ? (
+                  <s-text>
+                    <s-text type="strong">Selected file:</s-text> {fileName}
+                  </s-text>
+                ) : null}
+              </s-stack>
+            </s-section>
+
+            {parseResult ? (
+              <s-section heading="Parsed CSV Data" padding="none">
+                <s-box padding="base">
+                  <s-stack gap="base" direction="block">
+                    <s-text color="subdued">
+                      {parseResult.rowCount} rows ready to import
+                    </s-text>
+                    <s-button
+                      variant="primary"
+                      onClick={onCreateOrders}
+                      {...(isCreating ? { loading: true } : {})}
+                      disabled={!canCreate}
+                    >
+                      Create Orders
+                    </s-button>
+                  </s-stack>
+                </s-box>
+
+                <s-table>
+                  <s-table-header-row>
+                    <s-table-header listSlot="kicker">Row</s-table-header>
+                    <s-table-header listSlot="primary">First Name</s-table-header>
+                    <s-table-header listSlot="labeled">Last Name</s-table-header>
+                    <s-table-header listSlot="labeled">Address</s-table-header>
+                    <s-table-header listSlot="labeled">City</s-table-header>
+                    <s-table-header listSlot="labeled">State</s-table-header>
+                    <s-table-header listSlot="labeled">Zip Code</s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {previewRows.map((row) => {
+                      const [firstName, ...lastParts] = row.recipient.split(" ");
+                      return (
+                        <s-table-row key={row.rowNumber}>
+                          <s-table-cell>{row.rowNumber}</s-table-cell>
+                          <s-table-cell>{firstName || "-"}</s-table-cell>
+                          <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
+                          <s-table-cell>{row.address || "-"}</s-table-cell>
+                          <s-table-cell>{row.city || "-"}</s-table-cell>
+                          <s-table-cell>{row.state || "-"}</s-table-cell>
+                          <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                        </s-table-row>
+                      );
+                    })}
+                  </s-table-body>
+                </s-table>
+              </s-section>
+            ) : null}
+
+            {results.length > 0 ? (
+              <s-section heading="Created Orders" padding="none">
+                <s-table>
+                  <s-table-header-row>
+                    <s-table-header listSlot="kicker">Row</s-table-header>
+                    <s-table-header listSlot="primary">Recipient</s-table-header>
+                    <s-table-header listSlot="labeled">Status</s-table-header>
+                    <s-table-header listSlot="labeled">Error</s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {results.map((row) => (
+                      <s-table-row key={row.rowNumber}>
+                        <s-table-cell>{row.rowNumber}</s-table-cell>
+                        <s-table-cell>{row.recipient}</s-table-cell>
+                        <s-table-cell>
+                          <s-badge
+                            tone={row.status === "success" ? "success" : "critical"}
+                          >
+                            {row.status === "success" ? "Created" : "Failed"}
+                          </s-badge>
+                        </s-table-cell>
+                        <s-table-cell>{row.errorMessage || "-"}</s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+              </s-section>
+            ) : null}
+          </s-stack>
+        </div>
+
+        <div className="Polaris-Layout__Section Polaris-Layout__Section--oneThird">
           <s-stack direction="block" gap="base">
             <s-section heading="Order Settings">
               <s-stack direction="block" gap="base">
@@ -1041,8 +1133,8 @@ export default function Index() {
               </s-section>
             ) : null}
           </s-stack>
-        </s-grid-item>
-      </s-grid>
+        </div>
+      </div>
 
       <s-modal
         id="create-customer-modal"
@@ -1100,83 +1192,6 @@ export default function Index() {
           </s-stack>
         </s-stack>
       </s-modal>
-
-      {parseResult ? (
-        <s-section heading="Parsed CSV Data" padding="none">
-          <s-box padding="base">
-            <s-stack gap="base" direction="block">
-              <s-text color="subdued">
-                {parseResult.rowCount} rows ready to import
-              </s-text>
-              <s-button
-                variant="primary"
-                onClick={onCreateOrders}
-                {...(isCreating ? { loading: true } : {})}
-                disabled={!canCreate}
-              >
-                Create Orders
-              </s-button>
-            </s-stack>
-          </s-box>
-
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="kicker">Row</s-table-header>
-              <s-table-header listSlot="primary">First Name</s-table-header>
-              <s-table-header listSlot="labeled">Last Name</s-table-header>
-              <s-table-header listSlot="labeled">Address</s-table-header>
-              <s-table-header listSlot="labeled">City</s-table-header>
-              <s-table-header listSlot="labeled">State</s-table-header>
-              <s-table-header listSlot="labeled">Zip Code</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {previewRows.map((row) => {
-                const [firstName, ...lastParts] = row.recipient.split(" ");
-                return (
-                  <s-table-row key={row.rowNumber}>
-                    <s-table-cell>{row.rowNumber}</s-table-cell>
-                    <s-table-cell>{firstName || "-"}</s-table-cell>
-                    <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
-                    <s-table-cell>{row.address || "-"}</s-table-cell>
-                    <s-table-cell>{row.city || "-"}</s-table-cell>
-                    <s-table-cell>{row.state || "-"}</s-table-cell>
-                    <s-table-cell>{row.zipCode || "-"}</s-table-cell>
-                  </s-table-row>
-                );
-              })}
-            </s-table-body>
-          </s-table>
-        </s-section>
-      ) : null}
-
-      {results.length > 0 ? (
-        <s-section heading="Created Orders" padding="none">
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="kicker">Row</s-table-header>
-              <s-table-header listSlot="primary">Recipient</s-table-header>
-              <s-table-header listSlot="labeled">Status</s-table-header>
-              <s-table-header listSlot="labeled">Error</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {results.map((row) => (
-                <s-table-row key={row.rowNumber}>
-                  <s-table-cell>{row.rowNumber}</s-table-cell>
-                  <s-table-cell>{row.recipient}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge
-                      tone={row.status === "success" ? "success" : "critical"}
-                    >
-                      {row.status === "success" ? "Created" : "Failed"}
-                    </s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{row.errorMessage || "-"}</s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        </s-section>
-      ) : null}
 
     </s-page>
   );
