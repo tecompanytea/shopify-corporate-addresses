@@ -499,7 +499,7 @@ export default function Index() {
   );
   const customerPickerRef = useRef<HTMLDivElement | null>(null);
   const customerFieldElementRef = useRef<HTMLElement | null>(null);
-  const customerBlurTimeoutRef = useRef<number | null>(null);
+  const customerMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
   const isGeneratingReport = reportFetcher.state === "submitting";
@@ -642,12 +642,33 @@ export default function Index() {
   }, [isCustomerDropdownOpen, customerInputValue]);
 
   useEffect(() => {
-    return () => {
-      if (customerBlurTimeoutRef.current !== null) {
-        window.clearTimeout(customerBlurTimeoutRef.current);
+    if (!isCustomerDropdownOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const picker = customerPickerRef.current;
+      const menu = customerMenuRef.current;
+      const target = event.target as Node | null;
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const insidePicker = picker
+        ? path.includes(picker) || (target ? picker.contains(target) : false)
+        : false;
+      const insideMenu = menu
+        ? path.includes(menu) || (target ? menu.contains(target) : false)
+        : false;
+
+      if (insidePicker || insideMenu) {
+        return;
       }
+
+      setIsCustomerDropdownOpen(false);
+      setCustomerMenuRect(null);
     };
-  }, []);
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [isCustomerDropdownOpen]);
 
   const filteredCustomers = useMemo(() => {
     const query = customerInputValue.trim().toLowerCase();
@@ -780,24 +801,8 @@ export default function Index() {
 
   const onCustomerFieldFocus = (event: Event) => {
     customerFieldElementRef.current = event.currentTarget as HTMLElement;
-    if (customerBlurTimeoutRef.current !== null) {
-      window.clearTimeout(customerBlurTimeoutRef.current);
-      customerBlurTimeoutRef.current = null;
-    }
     setIsCustomerDropdownOpen(true);
     updateCustomerMenuPosition();
-  };
-
-  const onCustomerFieldBlur = () => {
-    if (customerBlurTimeoutRef.current !== null) {
-      window.clearTimeout(customerBlurTimeoutRef.current);
-    }
-
-    customerBlurTimeoutRef.current = window.setTimeout(() => {
-      setIsCustomerDropdownOpen(false);
-      setCustomerMenuRect(null);
-      customerBlurTimeoutRef.current = null;
-    }, 120);
   };
 
   const onSelectCustomer = (customer: CustomerOption) => {
@@ -1046,7 +1051,6 @@ export default function Index() {
                     value={customerInputValue}
                     onInput={onCustomerFieldInput}
                     onFocus={onCustomerFieldFocus}
-                    onBlur={onCustomerFieldBlur}
                   />
                 </div>
 
@@ -1178,6 +1182,7 @@ export default function Index() {
       {isHydrated && isCustomerDropdownOpen && customerMenuRect ? (
         createPortal(
           <div
+            ref={customerMenuRef}
             className="customer-picker__menu"
             style={{
               top: `${customerMenuRect.top}px`,
