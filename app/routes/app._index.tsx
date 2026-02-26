@@ -122,6 +122,21 @@ type ReportActionData =
       warning?: string;
     };
 
+type CustomerActionData =
+  | {
+      type: "search";
+      customers: CustomerOption[];
+      warning?: string;
+    }
+  | {
+      type: "create";
+      customer: CustomerOption;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
+
 type ActionPayload = {
   rowCount: number;
   orders: OrderDraft[];
@@ -192,6 +207,36 @@ const CUSTOMERS_QUERY = `#graphql
           displayName
           email
         }
+      }
+    }
+  }
+`;
+
+const SEARCH_CUSTOMERS_QUERY = `#graphql
+  query SearchCustomers($query: String!) {
+    customers(first: 25, query: $query) {
+      edges {
+        node {
+          id
+          displayName
+          email
+        }
+      }
+    }
+  }
+`;
+
+const CUSTOMER_CREATE_MUTATION = `#graphql
+  mutation CustomerCreateForImporter($input: CustomerInput!) {
+    customerCreate(input: $input) {
+      customer {
+        id
+        displayName
+        email
+      }
+      userErrors {
+        field
+        message
       }
     }
   }
@@ -286,6 +331,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return generateShippingReport(admin, formData);
   }
 
+  if (intent === "search_customers") {
+    return searchCustomers(admin, formData);
+  }
+
+  if (intent === "create_customer") {
+    return createCustomer(admin, formData);
+  }
+
   const payloadText = formData.get("payload");
 
   if (typeof payloadText !== "string") {
@@ -362,9 +415,21 @@ export default function Index() {
   const { customers, customerLoadWarning } = useLoaderData<typeof loader>();
   const createFetcher = useFetcher<CreateActionData>();
   const reportFetcher = useFetcher<ReportActionData>();
+  const customerFetcher = useFetcher<CustomerActionData>();
 
   const [fileName, setFileName] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [customerSearchInput, setCustomerSearchInput] = useState("");
+  const [customerResults, setCustomerResults] = useState<CustomerOption[]>(
+    customers.slice(0, 50),
+  );
+  const [newCustomerNameInput, setNewCustomerNameInput] = useState("");
+  const [newCustomerEmailInput, setNewCustomerEmailInput] = useState("");
+  const [customerMessage, setCustomerMessage] = useState("");
+  const [customerMessageTone, setCustomerMessageTone] = useState<
+    "success" | "warning"
+  >("success");
+  const [customerError, setCustomerError] = useState("");
   const [orderTagsInput, setOrderTagsInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
@@ -380,8 +445,19 @@ export default function Index() {
 
   const isCreating = createFetcher.state === "submitting";
   const isGeneratingReport = reportFetcher.state === "submitting";
+  const isCustomerActionSubmitting = customerFetcher.state === "submitting";
+  const customerIntent = customerFetcher.formData?.get("intent");
+  const isSearchingCustomers =
+    isCustomerActionSubmitting && customerIntent === "search_customers";
+  const isCreatingCustomer =
+    isCustomerActionSubmitting && customerIntent === "create_customer";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (customerSearchInput.trim().length > 0) return;
+    setCustomerResults(customers.slice(0, 50));
+  }, [customerSearchInput, customers]);
 
   useEffect(() => {
     if (!createFetcher.data) return;
@@ -419,6 +495,43 @@ export default function Index() {
         `Found ${reportFetcher.data.reportOrders.length} order(s) for report.`,
     );
   }, [reportFetcher.data]);
+
+  useEffect(() => {
+    if (!customerFetcher.data) return;
+
+    if (customerFetcher.data.type === "error") {
+      setCustomerError(customerFetcher.data.error);
+      setCustomerMessage("");
+      return;
+    }
+
+    if (customerFetcher.data.type === "search") {
+      setCustomerError("");
+      setCustomerResults(customerFetcher.data.customers);
+      if (customerFetcher.data.warning) {
+        setCustomerMessage(customerFetcher.data.warning);
+        setCustomerMessageTone("warning");
+      } else {
+        setCustomerMessage(
+          `Found ${customerFetcher.data.customers.length} customer(s).`,
+        );
+        setCustomerMessageTone("success");
+      }
+      return;
+    }
+
+    const createdCustomer = customerFetcher.data.customer;
+    setCustomerError("");
+    setCustomerMessage(`Created customer ${createdCustomer.displayName}.`);
+    setCustomerMessageTone("success");
+    setCustomerResults((previous) =>
+      mergeCustomerOptions([createdCustomer, ...previous]),
+    );
+    setSelectedCustomerId(createdCustomer.id);
+    setCustomerSearchInput(createdCustomer.email || createdCustomer.displayName);
+    setNewCustomerNameInput("");
+    setNewCustomerEmailInput("");
+  }, [customerFetcher.data]);
 
   const previewRows = useMemo(
     () => parseResult?.previewRows.slice(0, 5) ?? [],
@@ -465,6 +578,43 @@ export default function Index() {
 
   const onDropZoneRejected = () => {
     setParseNotice("Please upload a .csv file.");
+  };
+
+  const onSearchCustomers = () => {
+    const query = customerSearchInput.trim();
+    if (query.length < 2) {
+      setCustomerMessage("Type at least 2 characters to search.");
+      setCustomerMessageTone("warning");
+      setCustomerError("");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("intent", "search_customers");
+    formData.append("query", query);
+    customerFetcher.submit(formData, { method: "POST" });
+  };
+
+  const onResetCustomerSearch = () => {
+    setCustomerSearchInput("");
+    setCustomerResults(customers.slice(0, 50));
+    setCustomerMessage("");
+    setCustomerError("");
+  };
+
+  const onCreateCustomer = () => {
+    const email = newCustomerEmailInput.trim();
+    if (!email) {
+      setCustomerError("New customer email is required.");
+      setCustomerMessage("");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("intent", "create_customer");
+    formData.append("email", email);
+    formData.append("name", newCustomerNameInput.trim());
+    customerFetcher.submit(formData, { method: "POST" });
   };
 
   const onCreateOrders = () => {
@@ -534,6 +684,12 @@ export default function Index() {
         <s-banner tone="warning">{customerLoadWarning}</s-banner>
       ) : null}
 
+      {customerError ? <s-banner tone="critical">{customerError}</s-banner> : null}
+
+      {customerMessage ? (
+        <s-banner tone={customerMessageTone}>{customerMessage}</s-banner>
+      ) : null}
+
       {reportError ? <s-banner tone="critical">{reportError}</s-banner> : null}
 
       {reportNotice ? <s-banner tone="success">{reportNotice}</s-banner> : null}
@@ -576,6 +732,28 @@ export default function Index() {
 
       <s-section heading="Order Settings">
         <s-stack direction="block" gap="base">
+          <s-search-field
+            label="Search customer"
+            placeholder="Search by name or email"
+            value={customerSearchInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setCustomerSearchInput(target.value || "");
+            }}
+          />
+          <s-stack direction="inline" gap="base">
+            <s-button
+              variant="secondary"
+              onClick={onSearchCustomers}
+              {...(isSearchingCustomers ? { loading: true } : {})}
+            >
+              Search
+            </s-button>
+            <s-button onClick={onResetCustomerSearch}>
+              Reset
+            </s-button>
+          </s-stack>
+
           <s-select
             label="Customer (optional)"
             value={selectedCustomerId}
@@ -585,7 +763,7 @@ export default function Index() {
             }}
           >
             <s-option value="">No customer</s-option>
-            {customers.map((customer) => (
+            {customerResults.map((customer) => (
               <s-option key={customer.id} value={customer.id}>
                 {customer.displayName}
                 {customer.email ? ` (${customer.email})` : ""}
@@ -593,8 +771,38 @@ export default function Index() {
             ))}
           </s-select>
           <s-text color="subdued">
-            Assign all imported orders to one customer while shipping to each
-            recipient.
+            Pick one company customer for all imported orders while shipping to each
+            recipient address.
+          </s-text>
+
+          <s-text-field
+            label="New customer name (optional)"
+            placeholder="e.g., Acme Corp"
+            value={newCustomerNameInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setNewCustomerNameInput(target.value || "");
+            }}
+          />
+          <s-text-field
+            label="New customer email"
+            placeholder="e.g., billing@company.com"
+            value={newCustomerEmailInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setNewCustomerEmailInput(target.value || "");
+            }}
+          />
+          <s-button
+            variant="secondary"
+            onClick={onCreateCustomer}
+            {...(isCreatingCustomer ? { loading: true } : {})}
+            disabled={!newCustomerEmailInput.trim()}
+          >
+            Create Customer
+          </s-button>
+          <s-text color="subdued">
+            Create a customer if search does not find one.
           </s-text>
 
           <s-text-field
@@ -1214,6 +1422,175 @@ async function generateShippingReport(
   }
 }
 
+async function searchCustomers(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  formData: FormData,
+): Promise<CustomerActionData> {
+  const queryRaw = (formData.get("query") as string | null)?.trim() || "";
+  if (queryRaw.length < 2) {
+    return {
+      type: "search",
+      customers: [],
+      warning: "Type at least 2 characters to search.",
+    };
+  }
+
+  const searchQuery = `name:${escapeSearchValue(queryRaw)} OR email:${escapeSearchValue(queryRaw)}`;
+
+  try {
+    const response = await admin.graphql(SEARCH_CUSTOMERS_QUERY, {
+      variables: { query: searchQuery },
+    });
+
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        customers?: {
+          edges?: Array<{
+            node?: {
+              id?: string;
+              displayName?: string;
+              email?: string | null;
+            };
+          }>;
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      return {
+        type: "error",
+        error: json.errors.map((error) => error.message).join("; "),
+      };
+    }
+
+    const customers: CustomerOption[] = [];
+    for (const edge of json.data?.customers?.edges ?? []) {
+      const node = edge.node;
+      if (!node?.id) continue;
+      customers.push({
+        id: node.id,
+        displayName: node.displayName || node.email || "Unnamed customer",
+        email: node.email || "",
+      });
+    }
+
+    if (customers.length === 0) {
+      return {
+        type: "search",
+        customers: [],
+        warning: "No customer found. Create one below.",
+      };
+    }
+
+    return {
+      type: "search",
+      customers,
+    };
+  } catch (error) {
+    return {
+      type: "error",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to search customers.",
+    };
+  }
+}
+
+async function createCustomer(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  formData: FormData,
+): Promise<CustomerActionData> {
+  const email = (formData.get("email") as string | null)?.trim() || "";
+  const fullName = (formData.get("name") as string | null)?.trim() || "";
+
+  if (!email) {
+    return {
+      type: "error",
+      error: "Customer email is required.",
+    };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return {
+      type: "error",
+      error: "Customer email format is invalid.",
+    };
+  }
+
+  const [firstName, ...lastNameParts] = fullName.split(/\s+/).filter(Boolean);
+  const lastName = lastNameParts.join(" ");
+
+  try {
+    const response = await admin.graphql(CUSTOMER_CREATE_MUTATION, {
+      variables: {
+        input: {
+          email,
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+        },
+      },
+    });
+
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        customerCreate?: {
+          customer?: {
+            id?: string;
+            displayName?: string;
+            email?: string | null;
+          } | null;
+          userErrors?: Array<{ message: string }>;
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      return {
+        type: "error",
+        error: json.errors.map((error) => error.message).join("; "),
+      };
+    }
+
+    const payload = json.data?.customerCreate;
+    const userErrors = payload?.userErrors ?? [];
+    if (userErrors.length > 0) {
+      return {
+        type: "error",
+        error: userErrors.map((error) => error.message).join("; "),
+      };
+    }
+
+    const createdCustomer = payload?.customer;
+    if (!createdCustomer?.id) {
+      return {
+        type: "error",
+        error: "Customer was not created.",
+      };
+    }
+
+    return {
+      type: "create",
+      customer: {
+        id: createdCustomer.id,
+        displayName:
+          createdCustomer.displayName || createdCustomer.email || fullName || email,
+        email: createdCustomer.email || email,
+      },
+    };
+  } catch (error) {
+    return {
+      type: "error",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to create customer.",
+    };
+  }
+}
+
 function buildOrderSearchQuery(filters: {
   orderNumbers: string;
   startDate: string;
@@ -1258,6 +1635,19 @@ function splitCommaValues(value: string): string[] {
 
 function escapeSearchValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function mergeCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
+  const byId = new Map<string, CustomerOption>();
+
+  for (const customer of customers) {
+    if (!customer.id) continue;
+    if (!byId.has(customer.id)) {
+      byId.set(customer.id, customer);
+    }
+  }
+
+  return Array.from(byId.values());
 }
 
 function buildShippingReportCsv(orders: ShippingReportOrder[]): string {
