@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -15,22 +15,31 @@ type ShippingAddress = {
   firstName?: string;
   lastName?: string;
   address1?: string;
+  address2?: string;
   city?: string;
   provinceCode?: string;
   countryCode?: string;
   zip?: string;
-  phone?: string;
+};
+
+type MoneyBagInput = {
+  shopMoney: {
+    amount: string;
+    currencyCode: string;
+  };
 };
 
 type OrderLineInput = {
-  variantId: string;
   quantity: number;
+  variantId?: string;
+  title?: string;
+  requiresShipping?: boolean;
+  priceSet?: MoneyBagInput;
 };
 
 type OrderCreateInput = {
-  email: string;
+  email?: string;
   lineItems: OrderLineInput[];
-  currency?: string;
   note?: string;
   tags?: string[];
   shippingAddress?: ShippingAddress;
@@ -44,12 +53,13 @@ type OrderDraft = {
 
 type CsvPreviewRow = {
   rowNumber: number;
-  orderKey: string;
-  email: string;
-  variantId: string;
-  quantity: string;
   recipient: string;
-  destination: string;
+  address: string;
+  address2: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  email: string;
 };
 
 type InvalidRow = CsvPreviewRow & {
@@ -98,16 +108,38 @@ type ActionPayload = {
   invalidRows: InvalidRow[];
 };
 
-type OrderCreateResponse = {
-  ok: true;
-  id: string;
-  name: string;
-} | {
-  ok: false;
-  message: string;
+type NormalizedRow = {
+  email?: string;
+  note?: string;
+  shippingAddress: ShippingAddress;
 };
 
-const REQUIRED_COLUMNS = ["order_key", "email", "variant_id", "quantity"];
+type OrderCreateResponse =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+const REQUIRED_COLUMNS = [
+  "first_name",
+  "last_name",
+  "address",
+  "address2",
+  "city",
+  "state",
+  "zip_code",
+];
+
+const DEFAULT_COUNTRY_CODE = "US";
+const DEFAULT_LINE_ITEM_TITLE = "Corporate Gift";
+const DEFAULT_LINE_ITEM_PRICE = "0.00";
+const DEFAULT_LINE_ITEM_CURRENCY = "USD";
+const DEFAULT_LINE_ITEM_QUANTITY = 1;
 
 const ORDER_CREATE_MUTATION = `#graphql
   mutation OrderCreate($order: OrderCreateOrderInput!) {
@@ -153,12 +185,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     payload.previewRows.map((row) => [row.rowNumber, row]),
   );
 
-  const processedResults: RowResult[] = (payload.invalidRows ?? []).map(
-    (row) => ({
-      ...row,
-      status: "failed",
-    }),
-  );
+  const processedResults: RowResult[] = (payload.invalidRows ?? []).map((row) => ({
+    ...row,
+    status: "failed",
+  }));
 
   let successCount = 0;
   let failedCount = payload.invalidRows?.length ?? 0;
@@ -209,7 +239,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Index() {
   const fetcher = useFetcher<ActionData>();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [fileName, setFileName] = useState("");
+  const [orderTagsInput, setOrderTagsInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -253,12 +285,11 @@ export default function Index() {
     fileInputRef.current?.click();
   };
 
-  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    resetAll();
+  const handleSelectedFile = async (file: File) => {
     setFileName(file.name);
+    setParseResult(null);
+    setParseNotice("");
+    setImportResult(null);
 
     const content = await file.text();
     const parsed = parseCsvToOrders(content);
@@ -279,15 +310,41 @@ export default function Index() {
     setParseNotice("");
   };
 
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await handleSelectedFile(file);
+  };
+
+  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setParseNotice("Please upload a .csv file.");
+      return;
+    }
+    await handleSelectedFile(file);
+  };
+
   const onCreateOrders = () => {
     if (!parseResult || !canCreate) return;
+
+    const globalTags = parseTags(orderTagsInput);
+    const ordersWithTags = parseResult.orders.map((order) => ({
+      ...order,
+      input: {
+        ...order.input,
+        tags: globalTags,
+      },
+    }));
 
     const formData = new FormData();
     formData.append(
       "payload",
       JSON.stringify({
         rowCount: parseResult.rowCount,
-        orders: parseResult.orders,
+        orders: ordersWithTags,
         previewRows: parseResult.previewRows,
         invalidRows: parseResult.invalidRows,
       } satisfies ActionPayload),
@@ -322,97 +379,115 @@ export default function Index() {
       ) : null}
 
       {results.length === 0 ? (
-        <s-section heading="Upload CSV File">
-          <s-paragraph>
-            Required columns: <code>order_key</code>, <code>email</code>,{" "}
-            <code>variant_id</code>, <code>quantity</code>.
-          </s-paragraph>
-          <s-paragraph>
-            Optional columns: <code>shipping_first_name</code>,{" "}
-            <code>shipping_last_name</code>, <code>shipping_address1</code>,{" "}
-            <code>shipping_city</code>, <code>shipping_province_code</code>,{" "}
-            <code>shipping_country_code</code>, <code>shipping_zip</code>,{" "}
-            <code>phone</code>, <code>currency_code</code>, <code>note</code>,{" "}
-            <code>tags</code>.
-          </s-paragraph>
+        <>
+          <s-section heading="Upload CSV File">
+            <s-text>
+              Upload a CSV file with columns: <code>first_name</code>,{" "}
+              <code>last_name</code>, <code>address</code>, <code>address2</code>,{" "}
+              <code>city</code>, <code>state</code>, <code>zip_code</code>.
+            </s-text>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            onChange={onFileChange}
-            style={{ display: "none" }}
-          />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={onFileChange}
+              style={{ display: "none" }}
+            />
 
-          <s-stack direction="inline" gap="base">
-            <s-button variant="primary" onClick={onOpenFilePicker}>
-              Upload CSV
-            </s-button>
-            <s-text>{fileName ? `Selected file: ${fileName}` : ""}</s-text>
-          </s-stack>
-
-          {parseResult ? (
-            <>
-              <s-paragraph>
-                {parseResult.rowCount} rows found.{" "}
-                {parseResult.rowCount - parseResult.invalidRows.length} valid
-                rows. {parseResult.orders.length} order(s) ready.
-              </s-paragraph>
-
-              <s-section heading="Preview (first 5 rows)">
-                <s-table>
-                  <s-table-header-row>
-                    <s-table-header listSlot="kicker">Row</s-table-header>
-                    <s-table-header listSlot="primary">Order Key</s-table-header>
-                    <s-table-header listSlot="labeled">Email</s-table-header>
-                    <s-table-header listSlot="labeled">Recipient</s-table-header>
-                    <s-table-header listSlot="labeled">
-                      Destination
-                    </s-table-header>
-                    <s-table-header listSlot="labeled">
-                      Variant ID
-                    </s-table-header>
-                    <s-table-header listSlot="labeled">Qty</s-table-header>
-                  </s-table-header-row>
-                  <s-table-body>
-                    {previewRows.map((row) => (
-                      <s-table-row key={row.rowNumber}>
-                        <s-table-cell>{row.rowNumber}</s-table-cell>
-                        <s-table-cell>{row.orderKey || "-"}</s-table-cell>
-                        <s-table-cell>{row.email || "-"}</s-table-cell>
-                        <s-table-cell>{row.recipient || "-"}</s-table-cell>
-                        <s-table-cell>{row.destination || "-"}</s-table-cell>
-                        <s-table-cell>{row.variantId || "-"}</s-table-cell>
-                        <s-table-cell>{row.quantity || "-"}</s-table-cell>
-                      </s-table-row>
-                    ))}
-                  </s-table-body>
-                </s-table>
-              </s-section>
-
-              <s-stack direction="inline" gap="base" justifyContent="end">
-                <s-button onClick={resetAll}>Reset</s-button>
-                <s-button
-                  variant="primary"
-                  onClick={onCreateOrders}
-                  disabled={!canCreate}
-                  {...(isCreating ? { loading: true } : {})}
-                >
-                  Create Orders
+            <div
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={onDrop}
+              style={{
+                marginTop: "16px",
+                border: "1px dashed var(--s-border-color)",
+                borderRadius: "12px",
+                padding: "28px",
+                textAlign: "center",
+                background: "var(--s-surface-subdued)",
+              }}
+            >
+              <s-stack direction="block" gap="base" alignItems="center">
+                <s-button variant="primary" onClick={onOpenFilePicker}>
+                  Add files
                 </s-button>
+                <s-text>
+                  {fileName ? `Selected file: ${fileName}` : "Drop CSV file here"}
+                </s-text>
+                <s-text color="subdued">Accepts .csv</s-text>
               </s-stack>
-            </>
-          ) : null}
-        </s-section>
+            </div>
+
+            {parseResult ? (
+              <>
+                <s-paragraph>
+                  {parseResult.rowCount} rows found. {parseResult.orders.length} order(s)
+                  ready.
+                </s-paragraph>
+
+                <s-section heading="Preview (first 5 rows)">
+                  <s-table>
+                    <s-table-header-row>
+                      <s-table-header listSlot="kicker">Row</s-table-header>
+                      <s-table-header listSlot="primary">Recipient</s-table-header>
+                      <s-table-header listSlot="labeled">Address</s-table-header>
+                      <s-table-header listSlot="labeled">Address 2</s-table-header>
+                      <s-table-header listSlot="labeled">City</s-table-header>
+                      <s-table-header listSlot="labeled">State</s-table-header>
+                      <s-table-header listSlot="labeled">ZIP</s-table-header>
+                    </s-table-header-row>
+                    <s-table-body>
+                      {previewRows.map((row) => (
+                        <s-table-row key={row.rowNumber}>
+                          <s-table-cell>{row.rowNumber}</s-table-cell>
+                          <s-table-cell>{row.recipient || "-"}</s-table-cell>
+                          <s-table-cell>{row.address || "-"}</s-table-cell>
+                          <s-table-cell>{row.address2 || "-"}</s-table-cell>
+                          <s-table-cell>{row.city || "-"}</s-table-cell>
+                          <s-table-cell>{row.state || "-"}</s-table-cell>
+                          <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                        </s-table-row>
+                      ))}
+                    </s-table-body>
+                  </s-table>
+                </s-section>
+
+                <s-stack direction="inline" gap="base" justifyContent="end">
+                  <s-button onClick={resetAll}>Reset</s-button>
+                  <s-button
+                    variant="primary"
+                    onClick={onCreateOrders}
+                    disabled={!canCreate}
+                    {...(isCreating ? { loading: true } : {})}
+                  >
+                    Create Orders
+                  </s-button>
+                </s-stack>
+              </>
+            ) : null}
+          </s-section>
+
+          <s-section heading="Order Settings">
+            <s-text-field
+              label="Order Tags (optional)"
+              value={orderTagsInput}
+              onChange={(event) => setOrderTagsInput(event.currentTarget.value)}
+            ></s-text-field>
+            <s-text color="subdued">
+              Add tags to all imported orders. Separate multiple tags with commas.
+            </s-text>
+          </s-section>
+        </>
       ) : (
         <s-section heading="Results">
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">Row</s-table-header>
-              <s-table-header listSlot="primary">Order Key</s-table-header>
-              <s-table-header listSlot="labeled">Email</s-table-header>
-              <s-table-header listSlot="labeled">Variant ID</s-table-header>
-              <s-table-header listSlot="labeled">Qty</s-table-header>
+              <s-table-header listSlot="primary">Recipient</s-table-header>
+              <s-table-header listSlot="labeled">Address</s-table-header>
+              <s-table-header listSlot="labeled">City</s-table-header>
+              <s-table-header listSlot="labeled">State</s-table-header>
+              <s-table-header listSlot="labeled">ZIP</s-table-header>
               <s-table-header listSlot="inline">Status</s-table-header>
               <s-table-header listSlot="labeled">Error</s-table-header>
             </s-table-header-row>
@@ -420,10 +495,11 @@ export default function Index() {
               {results.map((row) => (
                 <s-table-row key={row.rowNumber}>
                   <s-table-cell>{row.rowNumber}</s-table-cell>
-                  <s-table-cell>{row.orderKey || "-"}</s-table-cell>
-                  <s-table-cell>{row.email || "-"}</s-table-cell>
-                  <s-table-cell>{row.variantId || "-"}</s-table-cell>
-                  <s-table-cell>{row.quantity || "-"}</s-table-cell>
+                  <s-table-cell>{row.recipient || "-"}</s-table-cell>
+                  <s-table-cell>{row.address || "-"}</s-table-cell>
+                  <s-table-cell>{row.city || "-"}</s-table-cell>
+                  <s-table-cell>{row.state || "-"}</s-table-cell>
+                  <s-table-cell>{row.zipCode || "-"}</s-table-cell>
                   <s-table-cell>
                     <s-badge
                       tone={row.status === "success" ? "success" : "critical"}
@@ -465,7 +541,9 @@ function parseCsvToOrders(csvText: string): ParseResult {
   }
 
   const headers = rows[0].map((header) => normalizeHeader(header));
-  const missingHeaders = REQUIRED_COLUMNS.filter((header) => !headers.includes(header));
+  const missingHeaders = REQUIRED_COLUMNS.filter(
+    (header) => !headers.includes(header),
+  );
 
   if (missingHeaders.length > 0) {
     return {
@@ -480,7 +558,7 @@ function parseCsvToOrders(csvText: string): ParseResult {
   const errors: string[] = [];
   const invalidRows: InvalidRow[] = [];
   const previewRows: CsvPreviewRow[] = [];
-  const groupedOrders = new Map<string, OrderDraft>();
+  const orders: OrderDraft[] = [];
 
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
     const csvRow = toRecord(headers, rows[rowIndex]);
@@ -498,41 +576,28 @@ function parseCsvToOrders(csvText: string): ParseResult {
       continue;
     }
 
-    const existing = groupedOrders.get(parsed.value.orderKey);
-    if (!existing) {
-      groupedOrders.set(parsed.value.orderKey, {
-        orderKey: parsed.value.orderKey,
-        rowNumbers: [rowNumber],
-        input: {
-          email: parsed.value.email,
-          lineItems: [
-            {
-              variantId: parsed.value.variantId,
-              quantity: parsed.value.quantity,
+    orders.push({
+      orderKey: `row-${rowNumber}`,
+      rowNumbers: [rowNumber],
+      input: {
+        email: parsed.value.email,
+        note: parsed.value.note,
+        shippingAddress: parsed.value.shippingAddress,
+        lineItems: [
+          {
+            title: DEFAULT_LINE_ITEM_TITLE,
+            quantity: DEFAULT_LINE_ITEM_QUANTITY,
+            requiresShipping: true,
+            priceSet: {
+              shopMoney: {
+                amount: DEFAULT_LINE_ITEM_PRICE,
+                currencyCode: DEFAULT_LINE_ITEM_CURRENCY,
+              },
             },
-          ],
-          currency: parsed.value.currency,
-          note: parsed.value.note,
-          tags: parsed.value.tags,
-          shippingAddress: parsed.value.shippingAddress,
-        },
-      });
-      continue;
-    }
-
-    if (existing.input.email !== parsed.value.email) {
-      const conflictMessage =
-        `Row ${rowNumber}: email does not match earlier rows for order_key=${parsed.value.orderKey}`;
-      errors.push(conflictMessage);
-      invalidRows.push({ ...previewRow, errorMessage: conflictMessage });
-      continue;
-    }
-
-    existing.input.lineItems.push({
-      variantId: parsed.value.variantId,
-      quantity: parsed.value.quantity,
+          },
+        ],
+      },
     });
-    existing.rowNumbers.push(rowNumber);
   }
 
   if (previewRows.length === 0) {
@@ -541,7 +606,7 @@ function parseCsvToOrders(csvText: string): ParseResult {
 
   return {
     rowCount: previewRows.length,
-    orders: Array.from(groupedOrders.values()),
+    orders,
     previewRows,
     invalidRows,
     errors,
@@ -622,59 +687,30 @@ function readColumn(record: CsvRecord, key: string): string {
 }
 
 function buildPreviewRow(record: CsvRecord, rowNumber: number): CsvPreviewRow {
-  const recipient = [readColumn(record, "shipping_first_name"), readColumn(record, "shipping_last_name")]
-    .filter(Boolean)
-    .join(" ");
-
-  const destination = [
-    readColumn(record, "shipping_city"),
-    readColumn(record, "shipping_province_code"),
-    readColumn(record, "shipping_country_code"),
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const firstName = readColumn(record, "first_name");
+  const lastName = readColumn(record, "last_name");
 
   return {
     rowNumber,
-    orderKey: readColumn(record, "order_key"),
+    recipient: [firstName, lastName].filter(Boolean).join(" "),
+    address: readColumn(record, "address"),
+    address2: readColumn(record, "address2"),
+    city: readColumn(record, "city"),
+    state: readColumn(record, "state"),
+    zipCode: readColumn(record, "zip_code"),
     email: readColumn(record, "email"),
-    variantId: readColumn(record, "variant_id"),
-    quantity: readColumn(record, "quantity"),
-    recipient,
-    destination,
   };
-}
-
-function normalizeVariantId(value: string): string {
-  if (/^\d+$/.test(value)) {
-    return `gid://shopify/ProductVariant/${value}`;
-  }
-  return value;
 }
 
 function parseTags(value: string): string[] | undefined {
   if (!value) return undefined;
+
   const tags = value
-    .split(/[|,]/g)
+    .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
+
   return tags.length > 0 ? tags : undefined;
-}
-
-function buildShippingAddress(record: CsvRecord): ShippingAddress | undefined {
-  const shippingAddress: ShippingAddress = {
-    firstName: readColumn(record, "shipping_first_name") || undefined,
-    lastName: readColumn(record, "shipping_last_name") || undefined,
-    address1: readColumn(record, "shipping_address1") || undefined,
-    city: readColumn(record, "shipping_city") || undefined,
-    provinceCode: readColumn(record, "shipping_province_code") || undefined,
-    countryCode: readColumn(record, "shipping_country_code") || undefined,
-    zip: readColumn(record, "shipping_zip") || undefined,
-    phone: readColumn(record, "phone") || undefined,
-  };
-
-  const hasAnyField = Object.values(shippingAddress).some(Boolean);
-  return hasAnyField ? shippingAddress : undefined;
 }
 
 function normalizeRow(
@@ -683,68 +719,62 @@ function normalizeRow(
 ):
   | {
       ok: true;
-      value: {
-        orderKey: string;
-        email: string;
-        variantId: string;
-        quantity: number;
-        currency?: string;
-        note?: string;
-        tags?: string[];
-        shippingAddress?: ShippingAddress;
-      };
+      value: NormalizedRow;
     }
   | {
       ok: false;
       errors: string[];
     } {
   const rowErrors: string[] = [];
-  const orderKey = readColumn(record, "order_key");
-  const email = readColumn(record, "email");
-  const variantIdRaw = readColumn(record, "variant_id");
-  const quantityRaw = readColumn(record, "quantity");
 
-  if (!orderKey) rowErrors.push(`Row ${rowNumber}: order_key is required.`);
-  if (!email) rowErrors.push(`Row ${rowNumber}: email is required.`);
-  if (!variantIdRaw) rowErrors.push(`Row ${rowNumber}: variant_id is required.`);
+  const firstName = readColumn(record, "first_name");
+  const lastName = readColumn(record, "last_name");
+  const address1 = readColumn(record, "address");
+  const address2 = readColumn(record, "address2") || undefined;
+  const city = readColumn(record, "city");
+  const state = readColumn(record, "state");
+  const zip = readColumn(record, "zip_code");
+  const countryCode =
+    readColumn(record, "country_code").toUpperCase() || DEFAULT_COUNTRY_CODE;
+  const email = readColumn(record, "email") || undefined;
+  const note = readColumn(record, "note") || undefined;
 
-  const quantity = Number.parseInt(quantityRaw, 10);
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    rowErrors.push(`Row ${rowNumber}: quantity must be a positive integer.`);
-  }
+  if (!firstName) rowErrors.push(`Row ${rowNumber}: first_name is required.`);
+  if (!lastName) rowErrors.push(`Row ${rowNumber}: last_name is required.`);
+  if (!address1) rowErrors.push(`Row ${rowNumber}: address is required.`);
+  if (!city) rowErrors.push(`Row ${rowNumber}: city is required.`);
+  if (!state) rowErrors.push(`Row ${rowNumber}: state is required.`);
+  if (!zip) rowErrors.push(`Row ${rowNumber}: zip_code is required.`);
 
   if (rowErrors.length > 0) {
     return { ok: false, errors: rowErrors };
   }
 
-  const currency = readColumn(record, "currency_code");
-  const normalizedCurrency = currency ? currency.toUpperCase() : undefined;
-  const note = readColumn(record, "note") || undefined;
-  const tags = parseTags(readColumn(record, "tags"));
-  const shippingAddress = buildShippingAddress(record);
-
   return {
     ok: true,
     value: {
-      orderKey,
       email,
-      variantId: normalizeVariantId(variantIdRaw),
-      quantity,
-      currency: normalizedCurrency,
       note,
-      tags,
-      shippingAddress,
+      shippingAddress: {
+        firstName,
+        lastName,
+        address1,
+        address2,
+        city,
+        provinceCode: state,
+        countryCode,
+        zip,
+      },
     },
   };
 }
 
 function compactOrderInput(input: OrderCreateInput): OrderCreateInput {
   const compacted: OrderCreateInput = {
-    email: input.email,
     lineItems: input.lineItems,
   };
 
-  if (input.currency) compacted.currency = input.currency;
+  if (input.email) compacted.email = input.email;
   if (input.note) compacted.note = input.note;
   if (input.tags && input.tags.length > 0) compacted.tags = input.tags;
   if (input.shippingAddress) compacted.shippingAddress = input.shippingAddress;
