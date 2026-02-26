@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -419,12 +419,16 @@ export default function Index() {
 
   const [fileName, setFileName] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [customerSearchInput, setCustomerSearchInput] = useState("");
-  const [customerResults, setCustomerResults] = useState<CustomerOption[]>(
-    customers.slice(0, 50),
+  const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>(() =>
+    sortCustomerOptions(customers),
   );
-  const [newCustomerNameInput, setNewCustomerNameInput] = useState("");
-  const [newCustomerEmailInput, setNewCustomerEmailInput] = useState("");
+  const [customerInputValue, setCustomerInputValue] = useState("");
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const [createCustomerFirstNameInput, setCreateCustomerFirstNameInput] =
+    useState("");
+  const [createCustomerLastNameInput, setCreateCustomerLastNameInput] =
+    useState("");
+  const [createCustomerEmailInput, setCreateCustomerEmailInput] = useState("");
   const [customerMessage, setCustomerMessage] = useState("");
   const [customerMessageTone, setCustomerMessageTone] = useState<
     "success" | "warning"
@@ -442,22 +446,25 @@ export default function Index() {
   const [reportOrders, setReportOrders] = useState<ShippingReportOrder[]>([]);
   const [reportNotice, setReportNotice] = useState("");
   const [reportError, setReportError] = useState("");
+  const createCustomerModalRef = useRef<HTMLElementTagNameMap["s-modal"] | null>(
+    null,
+  );
+  const customerBlurTimeoutRef = useRef<number | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
   const isGeneratingReport = reportFetcher.state === "submitting";
   const isCustomerActionSubmitting = customerFetcher.state === "submitting";
   const customerIntent = customerFetcher.formData?.get("intent");
-  const isSearchingCustomers =
-    isCustomerActionSubmitting && customerIntent === "search_customers";
   const isCreatingCustomer =
     isCustomerActionSubmitting && customerIntent === "create_customer";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
   useEffect(() => {
-    if (customerSearchInput.trim().length > 0) return;
-    setCustomerResults(customers.slice(0, 50));
-  }, [customerSearchInput, customers]);
+    setCustomerOptions((existing) =>
+      mergeCustomerOptions([...existing, ...sortCustomerOptions(customers)]),
+    );
+  }, [customers]);
 
   useEffect(() => {
     if (!createFetcher.data) return;
@@ -497,41 +504,63 @@ export default function Index() {
   }, [reportFetcher.data]);
 
   useEffect(() => {
-    if (!customerFetcher.data) return;
+    const customerData = customerFetcher.data;
+    if (!customerData) return;
 
-    if (customerFetcher.data.type === "error") {
-      setCustomerError(customerFetcher.data.error);
+    if (customerData.type === "error") {
+      setCustomerError(customerData.error);
       setCustomerMessage("");
       return;
     }
 
-    if (customerFetcher.data.type === "search") {
+    if (customerData.type === "search") {
       setCustomerError("");
-      setCustomerResults(customerFetcher.data.customers);
-      if (customerFetcher.data.warning) {
-        setCustomerMessage(customerFetcher.data.warning);
-        setCustomerMessageTone("warning");
-      } else {
-        setCustomerMessage(
-          `Found ${customerFetcher.data.customers.length} customer(s).`,
-        );
-        setCustomerMessageTone("success");
-      }
+      setCustomerOptions((existing) =>
+        mergeCustomerOptions([...existing, ...customerData.customers]),
+      );
       return;
     }
 
-    const createdCustomer = customerFetcher.data.customer;
+    const createdCustomer = customerData.customer;
     setCustomerError("");
     setCustomerMessage(`Created customer ${createdCustomer.displayName}.`);
     setCustomerMessageTone("success");
-    setCustomerResults((previous) =>
-      mergeCustomerOptions([createdCustomer, ...previous]),
+    setCustomerOptions((existing) =>
+      mergeCustomerOptions([createdCustomer, ...existing]),
     );
     setSelectedCustomerId(createdCustomer.id);
-    setCustomerSearchInput(createdCustomer.email || createdCustomer.displayName);
-    setNewCustomerNameInput("");
-    setNewCustomerEmailInput("");
+    setCustomerInputValue(formatCustomerOption(createdCustomer));
+    setCreateCustomerFirstNameInput("");
+    setCreateCustomerLastNameInput("");
+    setCreateCustomerEmailInput("");
+    setIsCustomerDropdownOpen(false);
+    createCustomerModalRef.current?.hideOverlay?.();
   }, [customerFetcher.data]);
+
+  useEffect(() => {
+    return () => {
+      if (customerBlurTimeoutRef.current !== null) {
+        window.clearTimeout(customerBlurTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const filteredCustomers = useMemo(() => {
+    const query = customerInputValue.trim().toLowerCase();
+    const list = sortCustomerOptions(customerOptions);
+
+    if (!query) {
+      return list.slice(0, 50);
+    }
+
+    return list
+      .filter((customer) => {
+        const name = customer.displayName.toLowerCase();
+        const email = customer.email.toLowerCase();
+        return name.includes(query) || email.includes(query);
+      })
+      .slice(0, 50);
+  }, [customerInputValue, customerOptions]);
 
   const previewRows = useMemo(
     () => parseResult?.previewRows.slice(0, 5) ?? [],
@@ -580,32 +609,67 @@ export default function Index() {
     setParseNotice("Please upload a .csv file.");
   };
 
-  const onSearchCustomers = () => {
-    const query = customerSearchInput.trim();
-    if (query.length < 2) {
-      setCustomerMessage("Type at least 2 characters to search.");
-      setCustomerMessageTone("warning");
-      setCustomerError("");
-      return;
+  const onCustomerFieldInput = (event: Event) => {
+    const target = event.currentTarget as HTMLElement & { value?: string };
+    const value = target.value || "";
+    setCustomerInputValue(value);
+    setIsCustomerDropdownOpen(true);
+    setCustomerError("");
+    setCustomerMessage("");
+
+    if (selectedCustomerId) {
+      const selected = customerOptions.find(
+        (customer) => customer.id === selectedCustomerId,
+      );
+      if (!selected || formatCustomerOption(selected) !== value) {
+        setSelectedCustomerId("");
+      }
+    }
+  };
+
+  const onCustomerFieldFocus = () => {
+    if (customerBlurTimeoutRef.current !== null) {
+      window.clearTimeout(customerBlurTimeoutRef.current);
+      customerBlurTimeoutRef.current = null;
+    }
+    setIsCustomerDropdownOpen(true);
+  };
+
+  const onCustomerFieldBlur = () => {
+    if (customerBlurTimeoutRef.current !== null) {
+      window.clearTimeout(customerBlurTimeoutRef.current);
     }
 
-    const formData = new FormData();
-    formData.append("intent", "search_customers");
-    formData.append("query", query);
-    customerFetcher.submit(formData, { method: "POST" });
+    customerBlurTimeoutRef.current = window.setTimeout(() => {
+      setIsCustomerDropdownOpen(false);
+      customerBlurTimeoutRef.current = null;
+    }, 120);
   };
 
-  const onResetCustomerSearch = () => {
-    setCustomerSearchInput("");
-    setCustomerResults(customers.slice(0, 50));
-    setCustomerMessage("");
+  const onSelectCustomer = (customer: CustomerOption) => {
+    setSelectedCustomerId(customer.id);
+    setCustomerInputValue(formatCustomerOption(customer));
+    setIsCustomerDropdownOpen(false);
     setCustomerError("");
+    setCustomerMessage("");
   };
 
-  const onCreateCustomer = () => {
-    const email = newCustomerEmailInput.trim();
+  const onOpenCreateCustomerModal = () => {
+    const typedValue = customerInputValue.trim();
+    const extractedEmail = extractEmailCandidate(typedValue);
+    setCreateCustomerFirstNameInput("");
+    setCreateCustomerLastNameInput("");
+    setCreateCustomerEmailInput(extractedEmail);
+    setCustomerError("");
+    setCustomerMessage("");
+    setIsCustomerDropdownOpen(false);
+    createCustomerModalRef.current?.showOverlay?.();
+  };
+
+  const onCreateCustomerFromModal = () => {
+    const email = createCustomerEmailInput.trim();
     if (!email) {
-      setCustomerError("New customer email is required.");
+      setCustomerError("Email is required to create a customer.");
       setCustomerMessage("");
       return;
     }
@@ -613,7 +677,8 @@ export default function Index() {
     const formData = new FormData();
     formData.append("intent", "create_customer");
     formData.append("email", email);
-    formData.append("name", newCustomerNameInput.trim());
+    formData.append("firstName", createCustomerFirstNameInput.trim());
+    formData.append("lastName", createCustomerLastNameInput.trim());
     customerFetcher.submit(formData, { method: "POST" });
   };
 
@@ -733,76 +798,48 @@ export default function Index() {
       <s-section heading="Order Settings">
         <s-stack direction="block" gap="base">
           <s-search-field
-            label="Search customer"
-            placeholder="Search by name or email"
-            value={customerSearchInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setCustomerSearchInput(target.value || "");
-            }}
+            label="Search or create a customer"
+            placeholder="Search or create a customer"
+            value={customerInputValue}
+            onInput={onCustomerFieldInput}
+            onFocus={onCustomerFieldFocus}
+            onBlur={onCustomerFieldBlur}
           />
-          <s-stack direction="inline" gap="base">
-            <s-button
-              variant="secondary"
-              onClick={onSearchCustomers}
-              {...(isSearchingCustomers ? { loading: true } : {})}
-            >
-              Search
-            </s-button>
-            <s-button onClick={onResetCustomerSearch}>
-              Reset
-            </s-button>
-          </s-stack>
 
-          <s-select
-            label="Customer (optional)"
-            value={selectedCustomerId}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setSelectedCustomerId(target.value || "");
-            }}
-          >
-            <s-option value="">No customer</s-option>
-            {customerResults.map((customer) => (
-              <s-option key={customer.id} value={customer.id}>
-                {customer.displayName}
-                {customer.email ? ` (${customer.email})` : ""}
-              </s-option>
-            ))}
-          </s-select>
+          {isCustomerDropdownOpen ? (
+            <s-box border="base" borderRadius="base" overflow="hidden">
+              <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
+                <s-text type="strong">+ Create a new customer</s-text>
+              </s-clickable>
+              <s-divider />
+              {filteredCustomers.length === 0 ? (
+                <s-box padding="small">
+                  <s-text color="subdued">No matching customers.</s-text>
+                </s-box>
+              ) : (
+                filteredCustomers.map((customer, index) => (
+                  <s-box key={customer.id}>
+                    <s-clickable
+                      onClick={() => onSelectCustomer(customer)}
+                      padding="small"
+                    >
+                      <s-stack direction="block" gap="none">
+                        <s-text type="strong">{customer.displayName}</s-text>
+                        <s-text color="subdued">
+                          {customer.email || "No email"}
+                        </s-text>
+                      </s-stack>
+                    </s-clickable>
+                    {index < filteredCustomers.length - 1 ? <s-divider /> : null}
+                  </s-box>
+                ))
+              )}
+            </s-box>
+          ) : null}
+
           <s-text color="subdued">
             Pick one company customer for all imported orders while shipping to each
             recipient address.
-          </s-text>
-
-          <s-text-field
-            label="New customer name (optional)"
-            placeholder="e.g., Acme Corp"
-            value={newCustomerNameInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setNewCustomerNameInput(target.value || "");
-            }}
-          />
-          <s-text-field
-            label="New customer email"
-            placeholder="e.g., billing@company.com"
-            value={newCustomerEmailInput}
-            onInput={(event: Event) => {
-              const target = event.currentTarget as HTMLElement & { value?: string };
-              setNewCustomerEmailInput(target.value || "");
-            }}
-          />
-          <s-button
-            variant="secondary"
-            onClick={onCreateCustomer}
-            {...(isCreatingCustomer ? { loading: true } : {})}
-            disabled={!newCustomerEmailInput.trim()}
-          >
-            Create Customer
-          </s-button>
-          <s-text color="subdued">
-            Create a customer if search does not find one.
           </s-text>
 
           <s-text-field
@@ -819,6 +856,63 @@ export default function Index() {
           </s-text>
         </s-stack>
       </s-section>
+
+      <s-modal
+        id="create-customer-modal"
+        ref={createCustomerModalRef}
+        heading="Create a new customer"
+        size="base"
+      >
+        <s-stack direction="block" gap="base">
+          <s-stack direction="inline" gap="base">
+            <s-text-field
+              label="First name"
+              value={createCustomerFirstNameInput}
+              onInput={(event: Event) => {
+                const target = event.currentTarget as HTMLElement & {
+                  value?: string;
+                };
+                setCreateCustomerFirstNameInput(target.value || "");
+              }}
+            />
+            <s-text-field
+              label="Last name"
+              value={createCustomerLastNameInput}
+              onInput={(event: Event) => {
+                const target = event.currentTarget as HTMLElement & {
+                  value?: string;
+                };
+                setCreateCustomerLastNameInput(target.value || "");
+              }}
+            />
+          </s-stack>
+          <s-text-field
+            label="Email"
+            value={createCustomerEmailInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setCreateCustomerEmailInput(target.value || "");
+            }}
+          />
+          <s-stack direction="inline" gap="base" justifyContent="end">
+            <s-button
+              variant="secondary"
+              commandFor="create-customer-modal"
+              command="--hide"
+            >
+              Cancel
+            </s-button>
+            <s-button
+              variant="primary"
+              onClick={onCreateCustomerFromModal}
+              {...(isCreatingCustomer ? { loading: true } : {})}
+              disabled={!createCustomerEmailInput.trim()}
+            >
+              Save
+            </s-button>
+          </s-stack>
+        </s-stack>
+      </s-modal>
 
       {parseResult ? (
         <s-section heading="Parsed CSV Data" padding="none">
@@ -1503,6 +1597,9 @@ async function createCustomer(
   formData: FormData,
 ): Promise<CustomerActionData> {
   const email = (formData.get("email") as string | null)?.trim() || "";
+  const firstNameInput =
+    (formData.get("firstName") as string | null)?.trim() || "";
+  const lastNameInput = (formData.get("lastName") as string | null)?.trim() || "";
   const fullName = (formData.get("name") as string | null)?.trim() || "";
 
   if (!email) {
@@ -1519,8 +1616,14 @@ async function createCustomer(
     };
   }
 
-  const [firstName, ...lastNameParts] = fullName.split(/\s+/).filter(Boolean);
-  const lastName = lastNameParts.join(" ");
+  let firstName = firstNameInput;
+  let lastName = lastNameInput;
+
+  if (!firstName && !lastName && fullName) {
+    const [first, ...rest] = fullName.split(/\s+/).filter(Boolean);
+    firstName = first || "";
+    lastName = rest.join(" ");
+  }
 
   try {
     const response = await admin.graphql(CUSTOMER_CREATE_MUTATION, {
@@ -1576,7 +1679,10 @@ async function createCustomer(
       customer: {
         id: createdCustomer.id,
         displayName:
-          createdCustomer.displayName || createdCustomer.email || fullName || email,
+          createdCustomer.displayName ||
+          [firstName, lastName].filter(Boolean).join(" ") ||
+          createdCustomer.email ||
+          email,
         email: createdCustomer.email || email,
       },
     };
@@ -1647,7 +1753,25 @@ function mergeCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
     }
   }
 
-  return Array.from(byId.values());
+  return sortCustomerOptions(Array.from(byId.values()));
+}
+
+function sortCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
+  return [...customers].sort((a, b) => {
+    const aLabel = (a.displayName || a.email || "").toLowerCase();
+    const bLabel = (b.displayName || b.email || "").toLowerCase();
+    return aLabel.localeCompare(bLabel, "en");
+  });
+}
+
+function formatCustomerOption(customer: CustomerOption): string {
+  const name = customer.displayName || customer.email || "Unnamed customer";
+  return customer.email ? `${name} (${customer.email})` : name;
+}
+
+function extractEmailCandidate(value: string): string {
+  const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? match[0].toLowerCase() : "";
 }
 
 function buildShippingReportCsv(orders: ShippingReportOrder[]): string {
