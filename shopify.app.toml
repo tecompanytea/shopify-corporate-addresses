@@ -2,7 +2,7 @@
 
 client_id = "b0d5074c914b521115cd95afa27ea5a4"
 name = "Corporate Addresses"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://shopify-corporate-addresses.vercel.app"
 embedded = true
 
 [webhooks]
@@ -21,4 +21,4 @@ api_version = "2026-04"
 scopes = "write_orders"
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ "https://shopify-corporate-addresses.vercel.app/auth/callback" ]
