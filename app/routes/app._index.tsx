@@ -4,7 +4,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -30,14 +30,20 @@ type MoneyBagInput = {
 
 type OrderLineInput = {
   quantity: number;
-  variantId?: string;
   title?: string;
   requiresShipping?: boolean;
   priceSet?: MoneyBagInput;
 };
 
+type OrderCustomerInput = {
+  toAssociate?: {
+    id?: string;
+  };
+};
+
 type OrderCreateInput = {
   email?: string;
+  customer?: OrderCustomerInput;
   lineItems: OrderLineInput[];
   note?: string;
   tags?: string[];
@@ -100,17 +106,20 @@ type CreateActionData =
       results: RowResult[];
     };
 
-type ExportActionData =
+type ShippingReportOrder = {
+  id: string;
+  name: string;
+  customerName: string;
+  trackingNumbers: string[];
+};
+
+type ReportActionData =
   | {
       error: string;
     }
   | {
-      batchTag: string;
-      csvContent: string;
-      fileName: string;
-      orderCount: number;
-      trackingRowCount: number;
-      ordersWithoutTracking: number;
+      reportOrders: ShippingReportOrder[];
+      warning?: string;
     };
 
 type ActionPayload = {
@@ -137,18 +146,10 @@ type OrderCreateResponse =
       message: string;
     };
 
-type TrackingInfo = {
-  number: string;
-  company: string;
-  url: string;
-};
-
-type TrackingCsvRow = {
-  orderNumber: string;
-  recipientName: string;
-  trackingNumber: string;
-  carrier: string;
-  trackingUrl: string;
+type CustomerOption = {
+  id: string;
+  displayName: string;
+  email: string;
 };
 
 const REQUIRED_COLUMNS = [
@@ -182,17 +183,30 @@ const ORDER_CREATE_MUTATION = `#graphql
   }
 `;
 
-const ORDERS_BY_BATCH_TAG_QUERY = `#graphql
-  query OrdersByBatchTag($first: Int!, $after: String, $query: String!) {
-    orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT, reverse: true) {
-      pageInfo {
-        hasNextPage
-        endCursor
+const CUSTOMERS_QUERY = `#graphql
+  query CustomersForSelect {
+    customers(first: 250, sortKey: NAME) {
+      edges {
+        node {
+          id
+          displayName
+          email
+        }
       }
+    }
+  }
+`;
+
+const SHIPPING_REPORT_QUERY = `#graphql
+  query ShippingReportOrders($query: String) {
+    orders(first: 250, query: $query) {
       edges {
         node {
           id
           name
+          customer {
+            displayName
+          }
           shippingAddress {
             firstName
             lastName
@@ -202,8 +216,6 @@ const ORDERS_BY_BATCH_TAG_QUERY = `#graphql
               node {
                 trackingInfo {
                   number
-                  company
-                  url
                 }
               }
             }
@@ -215,8 +227,54 @@ const ORDERS_BY_BATCH_TAG_QUERY = `#graphql
 `;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return null;
+  const { admin } = await authenticate.admin(request);
+
+  const customers: CustomerOption[] = [];
+  let customerLoadWarning = "";
+
+  try {
+    const response = await admin.graphql(CUSTOMERS_QUERY);
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        customers?: {
+          edges?: Array<{
+            node?: {
+              id?: string;
+              displayName?: string;
+              email?: string | null;
+            };
+          }>;
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      const message = json.errors.map((error) => error.message).join("; ");
+      if (message.toLowerCase().includes("access denied")) {
+        customerLoadWarning =
+          "Customer selector unavailable. Add read_customers scope and redeploy.";
+      } else {
+        customerLoadWarning = `Unable to load customers: ${message}`;
+      }
+    } else {
+      for (const edge of json.data?.customers?.edges ?? []) {
+        const node = edge.node;
+        if (!node?.id) continue;
+
+        customers.push({
+          id: node.id,
+          displayName: node.displayName ?? "Unnamed customer",
+          email: node.email ?? "",
+        });
+      }
+    }
+  } catch {
+    customerLoadWarning =
+      "Unable to load customers right now. Customer selector may be incomplete.";
+  }
+
+  return { customers, customerLoadWarning };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -224,8 +282,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  if (intent === "export_tracking") {
-    return exportTrackingCsv(admin, formData);
+  if (intent === "generate_report") {
+    return generateShippingReport(admin, formData);
   }
 
   const payloadText = formData.get("payload");
@@ -301,21 +359,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Index() {
+  const { customers, customerLoadWarning } = useLoaderData<typeof loader>();
   const createFetcher = useFetcher<CreateActionData>();
-  const exportFetcher = useFetcher<ExportActionData>();
+  const reportFetcher = useFetcher<ReportActionData>();
 
   const [fileName, setFileName] = useState("");
-  const [companyCustomerEmail, setCompanyCustomerEmail] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [orderTagsInput, setOrderTagsInput] = useState("");
-  const [batchTagInput, setBatchTagInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
-  const [exportNotice, setExportNotice] = useState("");
-  const [exportError, setExportError] = useState("");
+
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [orderNumbersInput, setOrderNumbersInput] = useState("");
+  const [searchTagsInput, setSearchTagsInput] = useState("");
+  const [reportOrders, setReportOrders] = useState<ShippingReportOrder[]>([]);
+  const [reportNotice, setReportNotice] = useState("");
+  const [reportError, setReportError] = useState("");
 
   const isCreating = createFetcher.state === "submitting";
-  const isExporting = exportFetcher.state === "submitting";
+  const isGeneratingReport = reportFetcher.state === "submitting";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
@@ -339,32 +403,27 @@ export default function Index() {
   }, [createFetcher.data]);
 
   useEffect(() => {
-    if (!exportFetcher.data) return;
+    if (!reportFetcher.data) return;
 
-    if ("error" in exportFetcher.data) {
-      setExportError(exportFetcher.data.error);
-      setExportNotice("");
+    if ("error" in reportFetcher.data) {
+      setReportError(reportFetcher.data.error);
+      setReportNotice("");
+      setReportOrders([]);
       return;
     }
 
-    downloadCsv(exportFetcher.data.fileName, exportFetcher.data.csvContent);
-    setExportError("");
-    setExportNotice(
-      `Exported ${exportFetcher.data.trackingRowCount} row(s) from ${exportFetcher.data.orderCount} order(s) for batch \"${exportFetcher.data.batchTag}\".`,
+    setReportError("");
+    setReportOrders(reportFetcher.data.reportOrders);
+    setReportNotice(
+      reportFetcher.data.warning ||
+        `Found ${reportFetcher.data.reportOrders.length} order(s) for report.`,
     );
-  }, [exportFetcher.data]);
+  }, [reportFetcher.data]);
 
   const previewRows = useMemo(
     () => parseResult?.previewRows.slice(0, 5) ?? [],
     [parseResult],
   );
-
-  const resetAll = () => {
-    setFileName("");
-    setParseResult(null);
-    setParseNotice("");
-    setImportResult(null);
-  };
 
   const handleSelectedFile = async (file: File) => {
     setFileName(file.name);
@@ -394,8 +453,8 @@ export default function Index() {
   const onDropZoneInput = async (event: Event) => {
     const target = event.currentTarget as (HTMLElement & { files?: File[] }) | null;
     const file = target?.files?.[0];
-    if (!file) return;
 
+    if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setParseNotice("Please upload a .csv file.");
       return;
@@ -411,16 +470,20 @@ export default function Index() {
   const onCreateOrders = () => {
     if (!parseResult || !canCreate) return;
 
-    const batchTag = batchTagInput.trim();
-    const companyEmail = companyCustomerEmail.trim();
     const globalTags = parseTags(orderTagsInput);
 
     const ordersWithSettings = parseResult.orders.map((order) => ({
       ...order,
       input: {
         ...order.input,
-        email: companyEmail || order.input.email,
-        tags: mergeTags(order.input.tags, globalTags, batchTag ? [batchTag] : undefined),
+        customer: selectedCustomerId
+          ? {
+              toAssociate: {
+                id: selectedCustomerId,
+              },
+            }
+          : undefined,
+        tags: mergeTags(order.input.tags, globalTags),
       },
     }));
 
@@ -438,34 +501,42 @@ export default function Index() {
     createFetcher.submit(formData, { method: "POST" });
   };
 
-  const onExportTracking = () => {
-    const batchTag = batchTagInput.trim();
-    if (!batchTag) {
-      setExportError("Batch tag is required to export tracking.");
-      return;
-    }
-
+  const onGenerateReport = () => {
     const formData = new FormData();
-    formData.append("intent", "export_tracking");
-    formData.append("batchTag", batchTag);
+    formData.append("intent", "generate_report");
+    formData.append("orderNumbers", orderNumbersInput);
+    formData.append("startDate", startDate);
+    formData.append("endDate", endDate);
+    formData.append("searchTags", searchTagsInput);
 
-    exportFetcher.submit(formData, { method: "POST" });
+    reportFetcher.submit(formData, { method: "POST" });
+  };
+
+  const onExportReport = () => {
+    if (reportOrders.length === 0) return;
+    const csv = buildShippingReportCsv(reportOrders);
+    const fileNameDate = new Date().toISOString().slice(0, 10);
+    downloadCsv(`shipping-report-${fileNameDate}.csv`, csv);
   };
 
   const summary = importResult?.summary;
   const results = importResult?.results ?? [];
 
   return (
-    <s-page heading="Corporate Addresses CSV Import" inlineSize="large">
+    <s-page heading="CSV Order Importer">
       {importResult?.error ? (
         <s-banner tone="critical">{importResult.error}</s-banner>
       ) : null}
 
       {parseNotice ? <s-banner tone="warning">{parseNotice}</s-banner> : null}
 
-      {exportError ? <s-banner tone="critical">{exportError}</s-banner> : null}
+      {customerLoadWarning ? (
+        <s-banner tone="warning">{customerLoadWarning}</s-banner>
+      ) : null}
 
-      {exportNotice ? <s-banner tone="success">{exportNotice}</s-banner> : null}
+      {reportError ? <s-banner tone="critical">{reportError}</s-banner> : null}
+
+      {reportNotice ? <s-banner tone="success">{reportNotice}</s-banner> : null}
 
       {summary ? (
         summary.failed === 0 ? (
@@ -481,149 +552,128 @@ export default function Index() {
         )
       ) : null}
 
-      {results.length === 0 ? (
-        <s-section heading="Upload CSV File">
-          <s-text>
-            Upload a CSV file with columns: <code>first_name</code>,{" "}
-            <code>last_name</code>, <code>address</code>, <code>address2</code>,{" "}
-            <code>city</code>, <code>state</code>, <code>zip_code</code>.
+      <s-section heading="Upload CSV File">
+        <s-stack direction="block" gap="base">
+          <s-text color="subdued">
+            Upload a CSV file with columns: first_name, last_name, address, address2,
+            city, state, zip_code
           </s-text>
 
-          <s-stack direction="block" gap="base">
-            <s-drop-zone
-              label="Upload CSV"
-              accept=".csv,text/csv"
-              onInput={onDropZoneInput}
-              onDropRejected={onDropZoneRejected}
-            />
-            <s-text color="subdued">Accepts .csv</s-text>
-            {fileName ? <s-text>Selected file: {fileName}</s-text> : null}
-          </s-stack>
+          <s-drop-zone
+            label="Upload CSV"
+            accept=".csv,text/csv"
+            onInput={onDropZoneInput}
+            onDropRejected={onDropZoneRejected}
+          />
 
-          {parseResult ? (
-            <>
-              <s-paragraph>
-                {parseResult.rowCount} rows found. {parseResult.orders.length} order(s)
-                ready.
-              </s-paragraph>
-
-              <s-section heading="Preview (first 5 rows)">
-                <s-table>
-                  <s-table-header-row>
-                    <s-table-header listSlot="kicker">Row</s-table-header>
-                    <s-table-header listSlot="primary">Recipient</s-table-header>
-                    <s-table-header listSlot="labeled">Address</s-table-header>
-                    <s-table-header listSlot="labeled">Address 2</s-table-header>
-                    <s-table-header listSlot="labeled">City</s-table-header>
-                    <s-table-header listSlot="labeled">State</s-table-header>
-                    <s-table-header listSlot="labeled">ZIP</s-table-header>
-                  </s-table-header-row>
-                  <s-table-body>
-                    {previewRows.map((row) => (
-                      <s-table-row key={row.rowNumber}>
-                        <s-table-cell>{row.rowNumber}</s-table-cell>
-                        <s-table-cell>{row.recipient || "-"}</s-table-cell>
-                        <s-table-cell>{row.address || "-"}</s-table-cell>
-                        <s-table-cell>{row.address2 || "-"}</s-table-cell>
-                        <s-table-cell>{row.city || "-"}</s-table-cell>
-                        <s-table-cell>{row.state || "-"}</s-table-cell>
-                        <s-table-cell>{row.zipCode || "-"}</s-table-cell>
-                      </s-table-row>
-                    ))}
-                  </s-table-body>
-                </s-table>
-              </s-section>
-
-              <s-stack direction="inline" gap="base" justifyContent="end">
-                <s-button onClick={resetAll}>Reset</s-button>
-                <s-button
-                  variant="primary"
-                  onClick={onCreateOrders}
-                  disabled={!canCreate}
-                  {...(isCreating ? { loading: true } : {})}
-                >
-                  Create Orders
-                </s-button>
-              </s-stack>
-            </>
+          {fileName ? (
+            <s-text>
+              <s-text type="strong">Selected file:</s-text> {fileName}
+            </s-text>
           ) : null}
-        </s-section>
-      ) : null}
+        </s-stack>
+      </s-section>
 
       <s-section heading="Order Settings">
         <s-stack direction="block" gap="base">
-          <s-text-field
-            label="Company Customer Email (optional)"
-            placeholder="buyer@company.com"
-            value={companyCustomerEmail}
-            onChange={(event) => setCompanyCustomerEmail(event.currentTarget.value)}
-          ></s-text-field>
+          <s-select
+            label="Customer (optional)"
+            value={selectedCustomerId}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setSelectedCustomerId(target.value || "");
+            }}
+          >
+            <s-option value="">No customer</s-option>
+            {customers.map((customer) => (
+              <s-option key={customer.id} value={customer.id}>
+                {customer.displayName}
+                {customer.email ? ` (${customer.email})` : ""}
+              </s-option>
+            ))}
+          </s-select>
           <s-text color="subdued">
-            If set, all imported orders are assigned to this one customer email while
-            shipping to each recipient address from the CSV.
+            Assign all imported orders to one customer while shipping to each
+            recipient.
           </s-text>
 
           <s-text-field
             label="Order Tags (optional)"
+            placeholder="e.g., imported, bulk-order"
             value={orderTagsInput}
-            onChange={(event) => setOrderTagsInput(event.currentTarget.value)}
-          ></s-text-field>
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setOrderTagsInput(target.value || "");
+            }}
+          />
           <s-text color="subdued">
             Add tags to all imported orders. Separate multiple tags with commas.
           </s-text>
-
-          <s-text-field
-            label="Batch Tag"
-            placeholder="batch:2026-02-26-sonya"
-            value={batchTagInput}
-            onChange={(event) => setBatchTagInput(event.currentTarget.value)}
-          ></s-text-field>
-          <s-text color="subdued">
-            Recommended for tracking exports. This tag is added to all imported orders.
-          </s-text>
         </s-stack>
       </s-section>
 
-      <s-section heading="Tracking Export">
-        <s-stack direction="block" gap="base">
-          <s-text>
-            After labels are purchased, export a tracking CSV by batch tag.
-          </s-text>
-          <s-stack direction="inline" gap="base" justifyContent="end">
-            <s-button
-              variant="primary"
-              onClick={onExportTracking}
-              disabled={!batchTagInput.trim() || isExporting}
-              {...(isExporting ? { loading: true } : {})}
-            >
-              Export Tracking CSV
-            </s-button>
-          </s-stack>
-        </s-stack>
-      </s-section>
+      {parseResult ? (
+        <s-section heading="Parsed CSV Data" padding="none">
+          <s-box padding="base">
+            <s-stack gap="base" direction="block">
+              <s-text color="subdued">
+                {parseResult.rowCount} rows ready to import
+              </s-text>
+              <s-button
+                variant="primary"
+                onClick={onCreateOrders}
+                {...(isCreating ? { loading: true } : {})}
+                disabled={!canCreate}
+              >
+                Create Orders
+              </s-button>
+            </s-stack>
+          </s-box>
+
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">Row</s-table-header>
+              <s-table-header listSlot="primary">First Name</s-table-header>
+              <s-table-header listSlot="labeled">Last Name</s-table-header>
+              <s-table-header listSlot="labeled">Address</s-table-header>
+              <s-table-header listSlot="labeled">City</s-table-header>
+              <s-table-header listSlot="labeled">State</s-table-header>
+              <s-table-header listSlot="labeled">Zip Code</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {previewRows.map((row) => {
+                const [firstName, ...lastParts] = row.recipient.split(" ");
+                return (
+                  <s-table-row key={row.rowNumber}>
+                    <s-table-cell>{row.rowNumber}</s-table-cell>
+                    <s-table-cell>{firstName || "-"}</s-table-cell>
+                    <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
+                    <s-table-cell>{row.address || "-"}</s-table-cell>
+                    <s-table-cell>{row.city || "-"}</s-table-cell>
+                    <s-table-cell>{row.state || "-"}</s-table-cell>
+                    <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                  </s-table-row>
+                );
+              })}
+            </s-table-body>
+          </s-table>
+        </s-section>
+      ) : null}
 
       {results.length > 0 ? (
-        <s-section heading="Results">
+        <s-section heading="Created Orders" padding="none">
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">Row</s-table-header>
               <s-table-header listSlot="primary">Recipient</s-table-header>
-              <s-table-header listSlot="labeled">Address</s-table-header>
-              <s-table-header listSlot="labeled">City</s-table-header>
-              <s-table-header listSlot="labeled">State</s-table-header>
-              <s-table-header listSlot="labeled">ZIP</s-table-header>
-              <s-table-header listSlot="inline">Status</s-table-header>
+              <s-table-header listSlot="labeled">Status</s-table-header>
               <s-table-header listSlot="labeled">Error</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {results.map((row) => (
                 <s-table-row key={row.rowNumber}>
                   <s-table-cell>{row.rowNumber}</s-table-cell>
-                  <s-table-cell>{row.recipient || "-"}</s-table-cell>
-                  <s-table-cell>{row.address || "-"}</s-table-cell>
-                  <s-table-cell>{row.city || "-"}</s-table-cell>
-                  <s-table-cell>{row.state || "-"}</s-table-cell>
-                  <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                  <s-table-cell>{row.recipient}</s-table-cell>
                   <s-table-cell>
                     <s-badge
                       tone={row.status === "success" ? "success" : "critical"}
@@ -636,12 +686,95 @@ export default function Index() {
               ))}
             </s-table-body>
           </s-table>
+        </s-section>
+      ) : null}
 
-          <s-stack direction="inline" justifyContent="end">
-            <s-button variant="primary" onClick={resetAll}>
-              Upload New CSV
+      <s-section heading="Shipping Report">
+        <s-stack gap="base" direction="block">
+          <s-text color="subdued">
+            Search by order numbers or date range. You can also filter by tags and
+            export the results.
+          </s-text>
+
+          <s-text-field
+            label="Order Numbers (optional)"
+            placeholder="e.g., #1001, #1002"
+            value={orderNumbersInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setOrderNumbersInput(target.value || "");
+            }}
+          />
+
+          <s-stack direction="inline" gap="base">
+            <s-date-field
+              label="Start Date (optional)"
+              value={startDate}
+              onInput={(event: Event) => {
+                const target = event.currentTarget as HTMLElement & { value?: string };
+                setStartDate(target.value || "");
+              }}
+            />
+            <s-date-field
+              label="End Date (optional)"
+              value={endDate}
+              onInput={(event: Event) => {
+                const target = event.currentTarget as HTMLElement & { value?: string };
+                setEndDate(target.value || "");
+              }}
+            />
+          </s-stack>
+
+          <s-text-field
+            label="Tags (optional)"
+            placeholder="e.g., imported, batch:sonya"
+            value={searchTagsInput}
+            onInput={(event: Event) => {
+              const target = event.currentTarget as HTMLElement & { value?: string };
+              setSearchTagsInput(target.value || "");
+            }}
+          />
+
+          <s-stack direction="inline" gap="base">
+            <s-button
+              variant="primary"
+              onClick={onGenerateReport}
+              {...(isGeneratingReport ? { loading: true } : {})}
+            >
+              Generate Report
+            </s-button>
+            <s-button
+              onClick={onExportReport}
+              disabled={reportOrders.length === 0}
+            >
+              Export to CSV
             </s-button>
           </s-stack>
+        </s-stack>
+      </s-section>
+
+      {reportOrders.length > 0 ? (
+        <s-section heading="Shipping Report Results" padding="none">
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Order Number</s-table-header>
+              <s-table-header listSlot="labeled">Customer Name</s-table-header>
+              <s-table-header listSlot="labeled">Tracking Numbers</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {reportOrders.map((order) => (
+                <s-table-row key={order.id}>
+                  <s-table-cell>{order.name}</s-table-cell>
+                  <s-table-cell>{order.customerName}</s-table-cell>
+                  <s-table-cell>
+                    {order.trackingNumbers.length > 0
+                      ? order.trackingNumbers.join(", ")
+                      : "No tracking"}
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
         </s-section>
       ) : null}
     </s-page>
@@ -837,9 +970,7 @@ function parseTags(value: string): string[] | undefined {
   return tags.length > 0 ? tags : undefined;
 }
 
-function mergeTags(
-  ...tagGroups: Array<string[] | undefined>
-): string[] | undefined {
+function mergeTags(...tagGroups: Array<string[] | undefined>): string[] | undefined {
   const merged = new Set<string>();
 
   for (const group of tagGroups) {
@@ -916,6 +1047,7 @@ function compactOrderInput(input: OrderCreateInput): OrderCreateInput {
   };
 
   if (input.email) compacted.email = input.email;
+  if (input.customer) compacted.customer = input.customer;
   if (input.note) compacted.note = input.note;
   if (input.tags && input.tags.length > 0) compacted.tags = input.tags;
   if (input.shippingAddress) compacted.shippingAddress = input.shippingAddress;
@@ -974,198 +1106,171 @@ async function createOrder(
   }
 }
 
-async function exportTrackingCsv(
+async function generateShippingReport(
   admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
   formData: FormData,
-): Promise<ExportActionData> {
-  const batchTagRaw = formData.get("batchTag");
-  if (typeof batchTagRaw !== "string" || !batchTagRaw.trim()) {
-    return { error: "Batch tag is required to export tracking." };
-  }
+): Promise<ReportActionData> {
+  const orderNumbers = (formData.get("orderNumbers") as string | null)?.trim() || "";
+  const startDate = (formData.get("startDate") as string | null)?.trim() || "";
+  const endDate = (formData.get("endDate") as string | null)?.trim() || "";
+  const searchTags = (formData.get("searchTags") as string | null)?.trim() || "";
 
-  const batchTag = batchTagRaw.trim();
-  const searchQuery = `status:any tag:'${escapeShopifySearchValue(batchTag)}'`;
+  const query = buildOrderSearchQuery({
+    orderNumbers,
+    startDate,
+    endDate,
+    searchTags,
+  });
 
   try {
-    const orders: Array<{
-      name: string;
-      recipientName: string;
-      tracking: TrackingInfo[];
-    }> = [];
+    const response = await admin.graphql(SHIPPING_REPORT_QUERY, {
+      variables: {
+        query: query || null,
+      },
+    });
 
-    let hasNextPage = true;
-    let cursor: string | null = null;
-
-    while (hasNextPage) {
-      const response = await admin.graphql(ORDERS_BY_BATCH_TAG_QUERY, {
-        variables: {
-          first: 100,
-          after: cursor,
-          query: searchQuery,
-        },
-      });
-
-      const json = (await response.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          orders?: {
-            pageInfo?: {
-              hasNextPage?: boolean;
-              endCursor?: string | null;
-            };
-            edges?: Array<{
-              node?: {
-                name?: string;
-                shippingAddress?: {
-                  firstName?: string | null;
-                  lastName?: string | null;
-                } | null;
-                fulfillments?: {
-                  edges?: Array<{
-                    node?: {
-                      trackingInfo?: Array<{
-                        number?: string | null;
-                        company?: string | null;
-                        url?: string | null;
-                      }> | null;
-                    };
-                  }>;
-                } | null;
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        orders?: {
+          edges?: Array<{
+            node?: {
+              id?: string;
+              name?: string;
+              customer?: {
+                displayName?: string;
+              } | null;
+              shippingAddress?: {
+                firstName?: string;
+                lastName?: string;
+              } | null;
+              fulfillments?: {
+                edges?: Array<{
+                  node?: {
+                    trackingInfo?: Array<{
+                      number?: string | null;
+                    }>;
+                  };
+                }>;
               };
-            }>;
-          };
+            };
+          }>;
         };
       };
-
-      if (json.errors && json.errors.length > 0) {
-        return {
-          error: json.errors.map((error) => error.message).join("; "),
-        };
-      }
-
-      const connection = json.data?.orders;
-      if (!connection) {
-        return { error: "Unexpected response while exporting tracking." };
-      }
-
-      for (const edge of connection.edges ?? []) {
-        const node = edge?.node;
-        if (!node?.name) continue;
-
-        const recipientName = [
-          node.shippingAddress?.firstName?.trim() ?? "",
-          node.shippingAddress?.lastName?.trim() ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-
-        const tracking: TrackingInfo[] = [];
-        for (const fulfillmentEdge of node.fulfillments?.edges ?? []) {
-          for (const info of fulfillmentEdge?.node?.trackingInfo ?? []) {
-            const number = (info?.number ?? "").trim();
-            const company = (info?.company ?? "").trim();
-            const url = (info?.url ?? "").trim();
-
-            if (!number && !company && !url) continue;
-            tracking.push({ number, company, url });
-          }
-        }
-
-        orders.push({
-          name: node.name,
-          recipientName,
-          tracking,
-        });
-      }
-
-      hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
-      cursor = connection.pageInfo?.endCursor ?? null;
-    }
-
-    if (orders.length === 0) {
-      return { error: `No orders found for batch tag "${batchTag}".` };
-    }
-
-    const csvRows: TrackingCsvRow[] = [];
-    let ordersWithoutTracking = 0;
-
-    for (const order of orders) {
-      if (order.tracking.length === 0) {
-        ordersWithoutTracking += 1;
-        csvRows.push({
-          orderNumber: order.name,
-          recipientName: order.recipientName,
-          trackingNumber: "",
-          carrier: "",
-          trackingUrl: "",
-        });
-        continue;
-      }
-
-      for (const tracking of order.tracking) {
-        csvRows.push({
-          orderNumber: order.name,
-          recipientName: order.recipientName,
-          trackingNumber: tracking.number,
-          carrier: tracking.company,
-          trackingUrl: tracking.url,
-        });
-      }
-    }
-
-    return {
-      batchTag,
-      csvContent: buildTrackingCsv(csvRows),
-      fileName: `tracking-${toFileSafeValue(batchTag)}-${new Date().toISOString().slice(0, 10)}.csv`,
-      orderCount: orders.length,
-      trackingRowCount: csvRows.length,
-      ordersWithoutTracking,
     };
+
+    if (json.errors && json.errors.length > 0) {
+      return {
+        error: json.errors.map((error) => error.message).join("; "),
+      };
+    }
+
+    const reportOrders: ShippingReportOrder[] = [];
+
+    for (const edge of json.data?.orders?.edges ?? []) {
+      const order = edge.node;
+      if (!order?.id || !order.name) continue;
+
+      const recipientName = [
+        order.shippingAddress?.firstName?.trim() ?? "",
+        order.shippingAddress?.lastName?.trim() ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const fallbackName = recipientName || "No customer";
+
+      const trackingNumbers: string[] = [];
+      for (const fulfillmentEdge of order.fulfillments?.edges ?? []) {
+        for (const info of fulfillmentEdge.node?.trackingInfo ?? []) {
+          const number = (info.number || "").trim();
+          if (number) trackingNumbers.push(number);
+        }
+      }
+
+      reportOrders.push({
+        id: order.id,
+        name: order.name,
+        customerName: order.customer?.displayName || fallbackName,
+        trackingNumbers,
+      });
+    }
+
+    if (reportOrders.length === 0) {
+      return {
+        reportOrders: [],
+        warning: "No orders found matching the report criteria.",
+      };
+    }
+
+    return { reportOrders };
   } catch (error) {
     return {
       error:
         error instanceof Error
           ? error.message
-          : "Unexpected error while exporting tracking.",
+          : "Failed to generate shipping report.",
     };
   }
 }
 
-function escapeShopifySearchValue(value: string): string {
+function buildOrderSearchQuery(filters: {
+  orderNumbers: string;
+  startDate: string;
+  endDate: string;
+  searchTags: string;
+}): string {
+  const queryParts: string[] = [];
+
+  const orderNumbers = splitCommaValues(filters.orderNumbers);
+  const tags = splitCommaValues(filters.searchTags);
+
+  if (orderNumbers.length > 0) {
+    queryParts.push(
+      `(${orderNumbers
+        .map((number) => `name:'${escapeSearchValue(number)}'`)
+        .join(" OR ")})`,
+    );
+  } else {
+    if (filters.startDate) {
+      queryParts.push(`created_at:>=${escapeSearchValue(filters.startDate)}`);
+    }
+    if (filters.endDate) {
+      queryParts.push(`created_at:<=${escapeSearchValue(filters.endDate)}`);
+    }
+  }
+
+  if (tags.length > 0) {
+    queryParts.push(
+      `(${tags.map((tag) => `tag:'${escapeSearchValue(tag)}'`).join(" OR ")})`,
+    );
+  }
+
+  return queryParts.join(" AND ");
+}
+
+function splitCommaValues(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function escapeSearchValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-function toFileSafeValue(value: string): string {
-  const safe = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+function buildShippingReportCsv(orders: ShippingReportOrder[]): string {
+  const header = ["Order Number", "Customer Name", "Tracking Numbers"];
+  const rows = orders.map((order) => [
+    order.name,
+    order.customerName,
+    order.trackingNumbers.join("; ") || "No tracking",
+  ]);
 
-  return safe || "batch";
-}
-
-function buildTrackingCsv(rows: TrackingCsvRow[]): string {
-  const headers = [
-    "order_number",
-    "recipient_name",
-    "tracking_number",
-    "carrier",
-    "tracking_url",
-  ];
-
-  const lines = rows.map((row) =>
-    [
-      row.orderNumber,
-      row.recipientName,
-      row.trackingNumber,
-      row.carrier,
-      row.trackingUrl,
-    ]
-      .map(csvEscape)
-      .join(","),
-  );
-
-  return [headers.join(","), ...lines].join("\n");
+  return [header, ...rows]
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\n");
 }
 
 function csvEscape(value: string): string {
@@ -1173,10 +1278,10 @@ function csvEscape(value: string): string {
   return `"${normalized.replace(/"/g, '""')}"`;
 }
 
-function downloadCsv(fileName: string, csvContent: string): void {
+function downloadCsv(fileName: string, content: string): void {
   if (typeof window === "undefined") return;
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
