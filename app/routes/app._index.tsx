@@ -183,6 +183,30 @@ const DEFAULT_LINE_ITEM_PRICE = "0.00";
 const DEFAULT_LINE_ITEM_CURRENCY = "USD";
 const DEFAULT_LINE_ITEM_QUANTITY = 1;
 
+const CUSTOMER_PICKER_STYLES = `
+.customer-picker {
+  position: relative;
+}
+
+.customer-picker__menu {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  background: var(--p-color-bg-surface, #fff);
+  border: 1px solid var(--p-color-border, #d1d5db);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+.customer-picker__list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+`;
+
 const ORDER_CREATE_MUTATION = `#graphql
   mutation OrderCreate($order: OrderCreateOrderInput!) {
     orderCreate(order: $order) {
@@ -214,7 +238,7 @@ const CUSTOMERS_QUERY = `#graphql
 
 const SEARCH_CUSTOMERS_QUERY = `#graphql
   query SearchCustomers($query: String!) {
-    customers(first: 25, query: $query) {
+    customers(first: 50, query: $query) {
       edges {
         node {
           id
@@ -415,7 +439,8 @@ export default function Index() {
   const { customers, customerLoadWarning } = useLoaderData<typeof loader>();
   const createFetcher = useFetcher<CreateActionData>();
   const reportFetcher = useFetcher<ReportActionData>();
-  const customerFetcher = useFetcher<CustomerActionData>();
+  const customerSearchFetcher = useFetcher<CustomerActionData>();
+  const customerCreateFetcher = useFetcher<CustomerActionData>();
 
   const [fileName, setFileName] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -453,10 +478,7 @@ export default function Index() {
 
   const isCreating = createFetcher.state === "submitting";
   const isGeneratingReport = reportFetcher.state === "submitting";
-  const isCustomerActionSubmitting = customerFetcher.state === "submitting";
-  const customerIntent = customerFetcher.formData?.get("intent");
-  const isCreatingCustomer =
-    isCustomerActionSubmitting && customerIntent === "create_customer";
+  const isCreatingCustomer = customerCreateFetcher.state === "submitting";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
@@ -504,24 +526,42 @@ export default function Index() {
   }, [reportFetcher.data]);
 
   useEffect(() => {
-    const customerData = customerFetcher.data;
-    if (!customerData) return;
+    const searchData = customerSearchFetcher.data;
+    if (!searchData) return;
 
-    if (customerData.type === "error") {
-      setCustomerError(customerData.error);
+    if (searchData.type === "error") {
+      setCustomerError(searchData.error);
       setCustomerMessage("");
       return;
     }
 
-    if (customerData.type === "search") {
-      setCustomerError("");
-      setCustomerOptions((existing) =>
-        mergeCustomerOptions([...existing, ...customerData.customers]),
-      );
+    if (searchData.type !== "search") return;
+
+    setCustomerError("");
+    setCustomerOptions((existing) =>
+      mergeCustomerOptions([...existing, ...searchData.customers]),
+    );
+    if (searchData.warning) {
+      setCustomerMessage(searchData.warning);
+      setCustomerMessageTone("warning");
+    } else {
+      setCustomerMessage("");
+    }
+  }, [customerSearchFetcher.data]);
+
+  useEffect(() => {
+    const createData = customerCreateFetcher.data;
+    if (!createData) return;
+
+    if (createData.type === "error") {
+      setCustomerError(createData.error);
+      setCustomerMessage("");
       return;
     }
 
-    const createdCustomer = customerData.customer;
+    if (createData.type !== "create") return;
+
+    const createdCustomer = createData.customer;
     setCustomerError("");
     setCustomerMessage(`Created customer ${createdCustomer.displayName}.`);
     setCustomerMessageTone("success");
@@ -535,7 +575,23 @@ export default function Index() {
     setCreateCustomerEmailInput("");
     setIsCustomerDropdownOpen(false);
     createCustomerModalRef.current?.hideOverlay?.();
-  }, [customerFetcher.data]);
+  }, [customerCreateFetcher.data]);
+
+  useEffect(() => {
+    const query = customerInputValue.trim();
+    if (query.length < 2) return;
+
+    const timeout = window.setTimeout(() => {
+      const formData = new FormData();
+      formData.append("intent", "search_customers");
+      formData.append("query", query);
+      customerSearchFetcher.submit(formData, { method: "POST" });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [customerInputValue]);
 
   useEffect(() => {
     return () => {
@@ -679,7 +735,7 @@ export default function Index() {
     formData.append("email", email);
     formData.append("firstName", createCustomerFirstNameInput.trim());
     formData.append("lastName", createCustomerLastNameInput.trim());
-    customerFetcher.submit(formData, { method: "POST" });
+    customerCreateFetcher.submit(formData, { method: "POST" });
   };
 
   const onCreateOrders = () => {
@@ -739,6 +795,8 @@ export default function Index() {
 
   return (
     <s-page heading="CSV Order Importer">
+      <style>{CUSTOMER_PICKER_STYLES}</style>
+
       {importResult?.error ? (
         <s-banner tone="critical">{importResult.error}</s-banner>
       ) : null}
@@ -805,47 +863,61 @@ export default function Index() {
           <s-stack direction="block" gap="base">
             <s-section heading="Order Settings">
               <s-stack direction="block" gap="base">
-                <s-search-field
-                  label="Search or create a customer"
-                  placeholder="Search or create a customer"
-                  value={customerInputValue}
-                  onInput={onCustomerFieldInput}
-                  onFocus={onCustomerFieldFocus}
-                  onBlur={onCustomerFieldBlur}
-                />
+                <div className="customer-picker">
+                  <s-search-field
+                    label="Search or create a customer"
+                    placeholder="Search or create a customer"
+                    value={customerInputValue}
+                    onInput={onCustomerFieldInput}
+                    onFocus={onCustomerFieldFocus}
+                    onBlur={onCustomerFieldBlur}
+                  />
 
-                {isCustomerDropdownOpen ? (
-                  <s-box border="base" borderRadius="base" overflow="hidden">
-                    <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
-                      <s-text type="strong">+ Create a new customer</s-text>
-                    </s-clickable>
-                    <s-divider />
-                    {filteredCustomers.length === 0 ? (
-                      <s-box padding="small">
-                        <s-text color="subdued">No matching customers.</s-text>
-                      </s-box>
-                    ) : (
-                      filteredCustomers.map((customer, index) => (
-                        <s-box key={customer.id}>
-                          <s-clickable
-                            onClick={() => onSelectCustomer(customer)}
-                            padding="small"
-                          >
-                            <s-stack direction="block" gap="none">
-                              <s-text type="strong">{customer.displayName}</s-text>
-                              <s-text color="subdued">
-                                {customer.email || "No email"}
-                              </s-text>
-                            </s-stack>
-                          </s-clickable>
-                          {index < filteredCustomers.length - 1 ? (
-                            <s-divider />
-                          ) : null}
-                        </s-box>
-                      ))
-                    )}
-                  </s-box>
-                ) : null}
+                  {isCustomerDropdownOpen ? (
+                    <div
+                      className="customer-picker__menu"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                      }}
+                    >
+                      <s-clickable
+                        onClick={onOpenCreateCustomerModal}
+                        padding="small"
+                      >
+                        <s-text type="strong">+ Create a new customer</s-text>
+                      </s-clickable>
+                      <s-divider />
+                      <div className="customer-picker__list">
+                        {filteredCustomers.length === 0 ? (
+                          <s-box padding="small">
+                            <s-text color="subdued">No matching customers.</s-text>
+                          </s-box>
+                        ) : (
+                          filteredCustomers.map((customer, index) => (
+                            <s-box key={customer.id}>
+                              <s-clickable
+                                onClick={() => onSelectCustomer(customer)}
+                                padding="small"
+                              >
+                                <s-stack direction="block" gap="none">
+                                  <s-text type="strong">
+                                    {customer.displayName}
+                                  </s-text>
+                                  <s-text color="subdued">
+                                    {customer.email || "No email"}
+                                  </s-text>
+                                </s-stack>
+                              </s-clickable>
+                              {index < filteredCustomers.length - 1 ? (
+                                <s-divider />
+                              ) : null}
+                            </s-box>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
 
                 <s-text color="subdued">
                   Pick one company customer for all imported orders while shipping
@@ -1556,7 +1628,16 @@ async function searchCustomers(
     };
   }
 
-  const searchQuery = `name:${escapeSearchValue(queryRaw)} OR email:${escapeSearchValue(queryRaw)}`;
+  const escaped = escapeSearchValue(queryRaw);
+  const tokenQueries = queryRaw
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const escapedPart = escapeSearchValue(part);
+      return `(name:${escapedPart}* OR email:${escapedPart}*)`;
+    });
+  const searchQuery = [...tokenQueries, escaped].join(" OR ");
 
   try {
     const response = await admin.graphql(SEARCH_CUSTOMERS_QUERY, {
