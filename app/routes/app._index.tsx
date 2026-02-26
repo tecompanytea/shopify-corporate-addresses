@@ -91,13 +91,26 @@ type ImportResult = {
   error: string;
 };
 
-type ActionData =
+type CreateActionData =
   | {
       error: string;
     }
   | {
       summary: Summary;
       results: RowResult[];
+    };
+
+type ExportActionData =
+  | {
+      error: string;
+    }
+  | {
+      batchTag: string;
+      csvContent: string;
+      fileName: string;
+      orderCount: number;
+      trackingRowCount: number;
+      ordersWithoutTracking: number;
     };
 
 type ActionPayload = {
@@ -123,6 +136,20 @@ type OrderCreateResponse =
       ok: false;
       message: string;
     };
+
+type TrackingInfo = {
+  number: string;
+  company: string;
+  url: string;
+};
+
+type TrackingCsvRow = {
+  orderNumber: string;
+  recipientName: string;
+  trackingNumber: string;
+  carrier: string;
+  trackingUrl: string;
+};
 
 const REQUIRED_COLUMNS = [
   "first_name",
@@ -155,6 +182,38 @@ const ORDER_CREATE_MUTATION = `#graphql
   }
 `;
 
+const ORDERS_BY_BATCH_TAG_QUERY = `#graphql
+  query OrdersByBatchTag($first: Int!, $after: String, $query: String!) {
+    orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT, reverse: true) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      edges {
+        node {
+          id
+          name
+          shippingAddress {
+            firstName
+            lastName
+          }
+          fulfillments(first: 20) {
+            edges {
+              node {
+                trackingInfo {
+                  number
+                  company
+                  url
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
   return null;
@@ -163,21 +222,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "export_tracking") {
+    return exportTrackingCsv(admin, formData);
+  }
+
   const payloadText = formData.get("payload");
 
   if (typeof payloadText !== "string") {
-    return { error: "Invalid upload payload." } satisfies ActionData;
+    return { error: "Invalid upload payload." } satisfies CreateActionData;
   }
 
   let payload: ActionPayload;
   try {
     payload = JSON.parse(payloadText) as ActionPayload;
   } catch {
-    return { error: "Failed to parse uploaded payload." } satisfies ActionData;
+    return { error: "Failed to parse uploaded payload." } satisfies CreateActionData;
   }
 
   if (!Array.isArray(payload.orders) || !Array.isArray(payload.previewRows)) {
-    return { error: "Invalid order payload format." } satisfies ActionData;
+    return { error: "Invalid order payload format." } satisfies CreateActionData;
   }
 
   const rowLookup = new Map<number, CsvPreviewRow>(
@@ -232,40 +297,62 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ordersCreated: ordersCreatedCount,
     },
     results: processedResults,
-  } satisfies ActionData;
+  } satisfies CreateActionData;
 };
 
 export default function Index() {
-  const fetcher = useFetcher<ActionData>();
+  const createFetcher = useFetcher<CreateActionData>();
+  const exportFetcher = useFetcher<ExportActionData>();
 
   const [fileName, setFileName] = useState("");
+  const [companyCustomerEmail, setCompanyCustomerEmail] = useState("");
   const [orderTagsInput, setOrderTagsInput] = useState("");
+  const [batchTagInput, setBatchTagInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [exportNotice, setExportNotice] = useState("");
+  const [exportError, setExportError] = useState("");
 
-  const isCreating = fetcher.state === "submitting";
+  const isCreating = createFetcher.state === "submitting";
+  const isExporting = exportFetcher.state === "submitting";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
   useEffect(() => {
-    if (!fetcher.data) return;
+    if (!createFetcher.data) return;
 
-    if ("error" in fetcher.data) {
+    if ("error" in createFetcher.data) {
       setImportResult({
         summary: null,
         results: [],
-        error: fetcher.data.error,
+        error: createFetcher.data.error,
       });
       return;
     }
 
     setImportResult({
-      summary: fetcher.data.summary,
-      results: fetcher.data.results,
+      summary: createFetcher.data.summary,
+      results: createFetcher.data.results,
       error: "",
     });
-  }, [fetcher.data]);
+  }, [createFetcher.data]);
+
+  useEffect(() => {
+    if (!exportFetcher.data) return;
+
+    if ("error" in exportFetcher.data) {
+      setExportError(exportFetcher.data.error);
+      setExportNotice("");
+      return;
+    }
+
+    downloadCsv(exportFetcher.data.fileName, exportFetcher.data.csvContent);
+    setExportError("");
+    setExportNotice(
+      `Exported ${exportFetcher.data.trackingRowCount} row(s) from ${exportFetcher.data.orderCount} order(s) for batch \"${exportFetcher.data.batchTag}\".`,
+    );
+  }, [exportFetcher.data]);
 
   const previewRows = useMemo(
     () => parseResult?.previewRows.slice(0, 5) ?? [],
@@ -308,10 +395,12 @@ export default function Index() {
     const target = event.currentTarget as (HTMLElement & { files?: File[] }) | null;
     const file = target?.files?.[0];
     if (!file) return;
+
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setParseNotice("Please upload a .csv file.");
       return;
     }
+
     await handleSelectedFile(file);
   };
 
@@ -322,12 +411,16 @@ export default function Index() {
   const onCreateOrders = () => {
     if (!parseResult || !canCreate) return;
 
+    const batchTag = batchTagInput.trim();
+    const companyEmail = companyCustomerEmail.trim();
     const globalTags = parseTags(orderTagsInput);
-    const ordersWithTags = parseResult.orders.map((order) => ({
+
+    const ordersWithSettings = parseResult.orders.map((order) => ({
       ...order,
       input: {
         ...order.input,
-        tags: globalTags,
+        email: companyEmail || order.input.email,
+        tags: mergeTags(order.input.tags, globalTags, batchTag ? [batchTag] : undefined),
       },
     }));
 
@@ -336,13 +429,27 @@ export default function Index() {
       "payload",
       JSON.stringify({
         rowCount: parseResult.rowCount,
-        orders: ordersWithTags,
+        orders: ordersWithSettings,
         previewRows: parseResult.previewRows,
         invalidRows: parseResult.invalidRows,
       } satisfies ActionPayload),
     );
 
-    fetcher.submit(formData, { method: "POST" });
+    createFetcher.submit(formData, { method: "POST" });
+  };
+
+  const onExportTracking = () => {
+    const batchTag = batchTagInput.trim();
+    if (!batchTag) {
+      setExportError("Batch tag is required to export tracking.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("intent", "export_tracking");
+    formData.append("batchTag", batchTag);
+
+    exportFetcher.submit(formData, { method: "POST" });
   };
 
   const summary = importResult?.summary;
@@ -355,6 +462,10 @@ export default function Index() {
       ) : null}
 
       {parseNotice ? <s-banner tone="warning">{parseNotice}</s-banner> : null}
+
+      {exportError ? <s-banner tone="critical">{exportError}</s-banner> : null}
+
+      {exportNotice ? <s-banner tone="success">{exportNotice}</s-banner> : null}
 
       {summary ? (
         summary.failed === 0 ? (
@@ -371,86 +482,127 @@ export default function Index() {
       ) : null}
 
       {results.length === 0 ? (
-        <>
-          <s-section heading="Upload CSV File">
-            <s-text>
-              Upload a CSV file with columns: <code>first_name</code>,{" "}
-              <code>last_name</code>, <code>address</code>, <code>address2</code>,{" "}
-              <code>city</code>, <code>state</code>, <code>zip_code</code>.
-            </s-text>
+        <s-section heading="Upload CSV File">
+          <s-text>
+            Upload a CSV file with columns: <code>first_name</code>,{" "}
+            <code>last_name</code>, <code>address</code>, <code>address2</code>,{" "}
+            <code>city</code>, <code>state</code>, <code>zip_code</code>.
+          </s-text>
 
-            <s-stack direction="block" gap="base">
-              <s-drop-zone
-                label="Upload CSV"
-                accept=".csv,text/csv"
-                onInput={onDropZoneInput}
-                onDropRejected={onDropZoneRejected}
-              />
-              <s-text color="subdued">Accepts .csv</s-text>
-              {fileName ? <s-text>Selected file: {fileName}</s-text> : null}
-            </s-stack>
+          <s-stack direction="block" gap="base">
+            <s-drop-zone
+              label="Upload CSV"
+              accept=".csv,text/csv"
+              onInput={onDropZoneInput}
+              onDropRejected={onDropZoneRejected}
+            />
+            <s-text color="subdued">Accepts .csv</s-text>
+            {fileName ? <s-text>Selected file: {fileName}</s-text> : null}
+          </s-stack>
 
-            {parseResult ? (
-              <>
-                <s-paragraph>
-                  {parseResult.rowCount} rows found. {parseResult.orders.length} order(s)
-                  ready.
-                </s-paragraph>
+          {parseResult ? (
+            <>
+              <s-paragraph>
+                {parseResult.rowCount} rows found. {parseResult.orders.length} order(s)
+                ready.
+              </s-paragraph>
 
-                <s-section heading="Preview (first 5 rows)">
-                  <s-table>
-                    <s-table-header-row>
-                      <s-table-header listSlot="kicker">Row</s-table-header>
-                      <s-table-header listSlot="primary">Recipient</s-table-header>
-                      <s-table-header listSlot="labeled">Address</s-table-header>
-                      <s-table-header listSlot="labeled">Address 2</s-table-header>
-                      <s-table-header listSlot="labeled">City</s-table-header>
-                      <s-table-header listSlot="labeled">State</s-table-header>
-                      <s-table-header listSlot="labeled">ZIP</s-table-header>
-                    </s-table-header-row>
-                    <s-table-body>
-                      {previewRows.map((row) => (
-                        <s-table-row key={row.rowNumber}>
-                          <s-table-cell>{row.rowNumber}</s-table-cell>
-                          <s-table-cell>{row.recipient || "-"}</s-table-cell>
-                          <s-table-cell>{row.address || "-"}</s-table-cell>
-                          <s-table-cell>{row.address2 || "-"}</s-table-cell>
-                          <s-table-cell>{row.city || "-"}</s-table-cell>
-                          <s-table-cell>{row.state || "-"}</s-table-cell>
-                          <s-table-cell>{row.zipCode || "-"}</s-table-cell>
-                        </s-table-row>
-                      ))}
-                    </s-table-body>
-                  </s-table>
-                </s-section>
+              <s-section heading="Preview (first 5 rows)">
+                <s-table>
+                  <s-table-header-row>
+                    <s-table-header listSlot="kicker">Row</s-table-header>
+                    <s-table-header listSlot="primary">Recipient</s-table-header>
+                    <s-table-header listSlot="labeled">Address</s-table-header>
+                    <s-table-header listSlot="labeled">Address 2</s-table-header>
+                    <s-table-header listSlot="labeled">City</s-table-header>
+                    <s-table-header listSlot="labeled">State</s-table-header>
+                    <s-table-header listSlot="labeled">ZIP</s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {previewRows.map((row) => (
+                      <s-table-row key={row.rowNumber}>
+                        <s-table-cell>{row.rowNumber}</s-table-cell>
+                        <s-table-cell>{row.recipient || "-"}</s-table-cell>
+                        <s-table-cell>{row.address || "-"}</s-table-cell>
+                        <s-table-cell>{row.address2 || "-"}</s-table-cell>
+                        <s-table-cell>{row.city || "-"}</s-table-cell>
+                        <s-table-cell>{row.state || "-"}</s-table-cell>
+                        <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+              </s-section>
 
-                <s-stack direction="inline" gap="base" justifyContent="end">
-                  <s-button onClick={resetAll}>Reset</s-button>
-                  <s-button
-                    variant="primary"
-                    onClick={onCreateOrders}
-                    disabled={!canCreate}
-                    {...(isCreating ? { loading: true } : {})}
-                  >
-                    Create Orders
-                  </s-button>
-                </s-stack>
-              </>
-            ) : null}
-          </s-section>
+              <s-stack direction="inline" gap="base" justifyContent="end">
+                <s-button onClick={resetAll}>Reset</s-button>
+                <s-button
+                  variant="primary"
+                  onClick={onCreateOrders}
+                  disabled={!canCreate}
+                  {...(isCreating ? { loading: true } : {})}
+                >
+                  Create Orders
+                </s-button>
+              </s-stack>
+            </>
+          ) : null}
+        </s-section>
+      ) : null}
 
-          <s-section heading="Order Settings">
-            <s-text-field
-              label="Order Tags (optional)"
-              value={orderTagsInput}
-              onChange={(event) => setOrderTagsInput(event.currentTarget.value)}
-            ></s-text-field>
-            <s-text color="subdued">
-              Add tags to all imported orders. Separate multiple tags with commas.
-            </s-text>
-          </s-section>
-        </>
-      ) : (
+      <s-section heading="Order Settings">
+        <s-stack direction="block" gap="base">
+          <s-text-field
+            label="Company Customer Email (optional)"
+            placeholder="buyer@company.com"
+            value={companyCustomerEmail}
+            onChange={(event) => setCompanyCustomerEmail(event.currentTarget.value)}
+          ></s-text-field>
+          <s-text color="subdued">
+            If set, all imported orders are assigned to this one customer email while
+            shipping to each recipient address from the CSV.
+          </s-text>
+
+          <s-text-field
+            label="Order Tags (optional)"
+            value={orderTagsInput}
+            onChange={(event) => setOrderTagsInput(event.currentTarget.value)}
+          ></s-text-field>
+          <s-text color="subdued">
+            Add tags to all imported orders. Separate multiple tags with commas.
+          </s-text>
+
+          <s-text-field
+            label="Batch Tag"
+            placeholder="batch:2026-02-26-sonya"
+            value={batchTagInput}
+            onChange={(event) => setBatchTagInput(event.currentTarget.value)}
+          ></s-text-field>
+          <s-text color="subdued">
+            Recommended for tracking exports. This tag is added to all imported orders.
+          </s-text>
+        </s-stack>
+      </s-section>
+
+      <s-section heading="Tracking Export">
+        <s-stack direction="block" gap="base">
+          <s-text>
+            After labels are purchased, export a tracking CSV by batch tag.
+          </s-text>
+          <s-stack direction="inline" gap="base" justifyContent="end">
+            <s-button
+              variant="primary"
+              onClick={onExportTracking}
+              disabled={!batchTagInput.trim() || isExporting}
+              {...(isExporting ? { loading: true } : {})}
+            >
+              Export Tracking CSV
+            </s-button>
+          </s-stack>
+        </s-stack>
+      </s-section>
+
+      {results.length > 0 ? (
         <s-section heading="Results">
           <s-table>
             <s-table-header-row>
@@ -491,7 +643,7 @@ export default function Index() {
             </s-button>
           </s-stack>
         </s-section>
-      )}
+      ) : null}
     </s-page>
   );
 }
@@ -685,6 +837,23 @@ function parseTags(value: string): string[] | undefined {
   return tags.length > 0 ? tags : undefined;
 }
 
+function mergeTags(
+  ...tagGroups: Array<string[] | undefined>
+): string[] | undefined {
+  const merged = new Set<string>();
+
+  for (const group of tagGroups) {
+    if (!group) continue;
+    for (const tag of group) {
+      const trimmed = tag.trim();
+      if (!trimmed) continue;
+      merged.add(trimmed);
+    }
+  }
+
+  return merged.size > 0 ? Array.from(merged) : undefined;
+}
+
 function normalizeRow(
   record: CsvRecord,
   rowNumber: number,
@@ -803,4 +972,217 @@ async function createOrder(
           : "Unexpected error while creating order.",
     };
   }
+}
+
+async function exportTrackingCsv(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  formData: FormData,
+): Promise<ExportActionData> {
+  const batchTagRaw = formData.get("batchTag");
+  if (typeof batchTagRaw !== "string" || !batchTagRaw.trim()) {
+    return { error: "Batch tag is required to export tracking." };
+  }
+
+  const batchTag = batchTagRaw.trim();
+  const searchQuery = `status:any tag:'${escapeShopifySearchValue(batchTag)}'`;
+
+  try {
+    const orders: Array<{
+      name: string;
+      recipientName: string;
+      tracking: TrackingInfo[];
+    }> = [];
+
+    let hasNextPage = true;
+    let cursor: string | null = null;
+
+    while (hasNextPage) {
+      const response = await admin.graphql(ORDERS_BY_BATCH_TAG_QUERY, {
+        variables: {
+          first: 100,
+          after: cursor,
+          query: searchQuery,
+        },
+      });
+
+      const json = (await response.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          orders?: {
+            pageInfo?: {
+              hasNextPage?: boolean;
+              endCursor?: string | null;
+            };
+            edges?: Array<{
+              node?: {
+                name?: string;
+                shippingAddress?: {
+                  firstName?: string | null;
+                  lastName?: string | null;
+                } | null;
+                fulfillments?: {
+                  edges?: Array<{
+                    node?: {
+                      trackingInfo?: Array<{
+                        number?: string | null;
+                        company?: string | null;
+                        url?: string | null;
+                      }> | null;
+                    };
+                  }>;
+                } | null;
+              };
+            }>;
+          };
+        };
+      };
+
+      if (json.errors && json.errors.length > 0) {
+        return {
+          error: json.errors.map((error) => error.message).join("; "),
+        };
+      }
+
+      const connection = json.data?.orders;
+      if (!connection) {
+        return { error: "Unexpected response while exporting tracking." };
+      }
+
+      for (const edge of connection.edges ?? []) {
+        const node = edge?.node;
+        if (!node?.name) continue;
+
+        const recipientName = [
+          node.shippingAddress?.firstName?.trim() ?? "",
+          node.shippingAddress?.lastName?.trim() ?? "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        const tracking: TrackingInfo[] = [];
+        for (const fulfillmentEdge of node.fulfillments?.edges ?? []) {
+          for (const info of fulfillmentEdge?.node?.trackingInfo ?? []) {
+            const number = (info?.number ?? "").trim();
+            const company = (info?.company ?? "").trim();
+            const url = (info?.url ?? "").trim();
+
+            if (!number && !company && !url) continue;
+            tracking.push({ number, company, url });
+          }
+        }
+
+        orders.push({
+          name: node.name,
+          recipientName,
+          tracking,
+        });
+      }
+
+      hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
+      cursor = connection.pageInfo?.endCursor ?? null;
+    }
+
+    if (orders.length === 0) {
+      return { error: `No orders found for batch tag "${batchTag}".` };
+    }
+
+    const csvRows: TrackingCsvRow[] = [];
+    let ordersWithoutTracking = 0;
+
+    for (const order of orders) {
+      if (order.tracking.length === 0) {
+        ordersWithoutTracking += 1;
+        csvRows.push({
+          orderNumber: order.name,
+          recipientName: order.recipientName,
+          trackingNumber: "",
+          carrier: "",
+          trackingUrl: "",
+        });
+        continue;
+      }
+
+      for (const tracking of order.tracking) {
+        csvRows.push({
+          orderNumber: order.name,
+          recipientName: order.recipientName,
+          trackingNumber: tracking.number,
+          carrier: tracking.company,
+          trackingUrl: tracking.url,
+        });
+      }
+    }
+
+    return {
+      batchTag,
+      csvContent: buildTrackingCsv(csvRows),
+      fileName: `tracking-${toFileSafeValue(batchTag)}-${new Date().toISOString().slice(0, 10)}.csv`,
+      orderCount: orders.length,
+      trackingRowCount: csvRows.length,
+      ordersWithoutTracking,
+    };
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unexpected error while exporting tracking.",
+    };
+  }
+}
+
+function escapeShopifySearchValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function toFileSafeValue(value: string): string {
+  const safe = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return safe || "batch";
+}
+
+function buildTrackingCsv(rows: TrackingCsvRow[]): string {
+  const headers = [
+    "order_number",
+    "recipient_name",
+    "tracking_number",
+    "carrier",
+    "tracking_url",
+  ];
+
+  const lines = rows.map((row) =>
+    [
+      row.orderNumber,
+      row.recipientName,
+      row.trackingNumber,
+      row.carrier,
+      row.trackingUrl,
+    ]
+      .map(csvEscape)
+      .join(","),
+  );
+
+  return [headers.join(","), ...lines].join("\n");
+}
+
+function csvEscape(value: string): string {
+  const normalized = value.replace(/\r?\n/g, " ");
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(fileName: string, csvContent: string): void {
+  if (typeof window === "undefined") return;
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
