@@ -21,9 +21,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Corporate Addresses</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Bulk-create Shopify orders from a CSV — ship to hundreds of addresses in one go.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -39,16 +39,13 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>CSV import</strong>. Upload a spreadsheet with recipient names, addresses, and line items — no manual data entry.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Bulk order creation</strong>. Generate hundreds of individual Shopify orders at once, each shipped to a unique address.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Batch tracking</strong>. Export a CSV summary of all created orders with tracking details for easy reconciliation.
           </li>
         </ul>
       </div>
