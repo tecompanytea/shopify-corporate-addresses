@@ -1,0 +1,11 @@
+api_version = "2025-10"
+
+[[extensions]]
+name = "t:name"
+handle = "csv-order-importer-block"
+uid = "bf8aae8d-d3de-415f-9599-b6c3967cd0e4"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/BlockExtension.tsx"
+target = "admin.order-details.block.render"

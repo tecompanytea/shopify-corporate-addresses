@@ -1,0 +1,10 @@
+[[extensions]]
+name = "t:name"
+
+handle = "csv-import-link-order-details"
+type = "admin_link"
+uid = "f9864183-1c67-4805-ad9b-27737083d3ba"
+
+[[extensions.targeting]]
+target = "admin.order-details.action.link"
+url = "app://"
