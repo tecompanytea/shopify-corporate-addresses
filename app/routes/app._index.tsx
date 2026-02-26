@@ -482,8 +482,6 @@ export default function Index() {
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
   const [orderNumbersInput, setOrderNumbersInput] = useState("");
   const [searchTagsInput, setSearchTagsInput] = useState("");
   const [reportOrders, setReportOrders] = useState<ShippingReportOrder[]>([]);
@@ -881,8 +879,6 @@ export default function Index() {
     const formData = new FormData();
     formData.append("intent", "generate_report");
     formData.append("orderNumbers", orderNumbersInput);
-    formData.append("startDate", startDate);
-    formData.append("endDate", endDate);
     formData.append("searchTags", searchTagsInput);
 
     reportFetcher.submit(formData, { method: "POST" });
@@ -1080,8 +1076,7 @@ export default function Index() {
             <s-section heading="Shipping Report">
               <s-stack gap="base" direction="block">
                 <s-text color="subdued">
-                  Search by order numbers or date range. You can also filter by
-                  tags and export the results.
+                  Search by order numbers and tags, then export the results.
                 </s-text>
 
                 <s-text-field
@@ -1095,29 +1090,6 @@ export default function Index() {
                     setOrderNumbersInput(target.value || "");
                   }}
                 />
-
-                <s-stack direction="inline" gap="base">
-                  <s-date-field
-                    label="Start Date (optional)"
-                    value={startDate}
-                    onInput={(event: Event) => {
-                      const target = event.currentTarget as HTMLElement & {
-                        value?: string;
-                      };
-                      setStartDate(target.value || "");
-                    }}
-                  />
-                  <s-date-field
-                    label="End Date (optional)"
-                    value={endDate}
-                    onInput={(event: Event) => {
-                      const target = event.currentTarget as HTMLElement & {
-                        value?: string;
-                      };
-                      setEndDate(target.value || "");
-                    }}
-                  />
-                </s-stack>
 
                 <s-text-field
                   label="Tags (optional)"
