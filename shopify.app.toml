@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "b0d5074c914b521115cd95afa27ea5a4"
+client_id = "764af1329eb2271ac7181ceb3da1854d"
 name = "Corporate Addresses"
 application_url = "https://shopify-corporate-addresses.vercel.app"
 embedded = true
