@@ -476,6 +476,7 @@ export default function Index() {
     "success" | "warning"
   >("success");
   const [customerError, setCustomerError] = useState("");
+  const [isHydrated, setIsHydrated] = useState(false);
   const [orderTagsInput, setOrderTagsInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
@@ -496,9 +497,8 @@ export default function Index() {
   const createCustomerModalRef = useRef<HTMLElementTagNameMap["s-modal"] | null>(
     null,
   );
-  const customerFieldRef = useRef<
-    HTMLElementTagNameMap["s-search-field"] | null
-  >(null);
+  const customerPickerRef = useRef<HTMLDivElement | null>(null);
+  const customerFieldElementRef = useRef<HTMLElement | null>(null);
   const customerBlurTimeoutRef = useRef<number | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
@@ -512,6 +512,10 @@ export default function Index() {
       mergeCustomerOptions([...existing, ...sortCustomerOptions(customers)]),
     );
   }, [customers]);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (!createFetcher.data) return;
@@ -662,15 +666,48 @@ export default function Index() {
       .slice(0, 50);
   }, [customerInputValue, customerOptions]);
 
+  const resolveCustomerAnchor = () => {
+    if (customerFieldElementRef.current) {
+      return customerFieldElementRef.current;
+    }
+
+    return customerPickerRef.current?.querySelector<HTMLElement>(
+      "s-search-field",
+    );
+  };
+
   const updateCustomerMenuPosition = () => {
-    const field = customerFieldRef.current;
-    if (!field) return;
+    const field = resolveCustomerAnchor();
+    if (!field) {
+      setCustomerMenuRect(null);
+      return;
+    }
+
+    customerFieldElementRef.current = field;
 
     const rect = field.getBoundingClientRect();
+    const viewportPadding = 8;
+    const menuMaxHeight = Math.min(320, window.innerHeight - 24);
+    const width = Math.max(rect.width, 280);
+    const maxLeft = Math.max(
+      viewportPadding,
+      window.innerWidth - width - viewportPadding,
+    );
+    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
+    const shouldOpenUpwards =
+      rect.bottom + 4 + menuMaxHeight > window.innerHeight - viewportPadding &&
+      rect.top - 4 - menuMaxHeight > viewportPadding;
+    const top = shouldOpenUpwards
+      ? Math.max(viewportPadding, rect.top - menuMaxHeight - 4)
+      : Math.min(
+          window.innerHeight - menuMaxHeight - viewportPadding,
+          rect.bottom + 4,
+        );
+
     setCustomerMenuRect({
-      top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
+      top,
+      left,
+      width,
     });
   };
 
@@ -724,6 +761,7 @@ export default function Index() {
   const onCustomerFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
+    customerFieldElementRef.current = target;
     setCustomerInputValue(value);
     setIsCustomerDropdownOpen(true);
     updateCustomerMenuPosition();
@@ -740,7 +778,8 @@ export default function Index() {
     }
   };
 
-  const onCustomerFieldFocus = () => {
+  const onCustomerFieldFocus = (event: Event) => {
+    customerFieldElementRef.current = event.currentTarget as HTMLElement;
     if (customerBlurTimeoutRef.current !== null) {
       window.clearTimeout(customerBlurTimeoutRef.current);
       customerBlurTimeoutRef.current = null;
@@ -1000,9 +1039,8 @@ export default function Index() {
           <s-stack direction="block" gap="base">
             <s-section heading="Order Settings">
               <s-stack direction="block" gap="base">
-                <div className="customer-picker">
+                <div className="customer-picker" ref={customerPickerRef}>
                   <s-search-field
-                    ref={customerFieldRef}
                     label="Search or create a customer"
                     placeholder="Search or create a customer"
                     value={customerInputValue}
@@ -1137,9 +1175,7 @@ export default function Index() {
         </div>
       </div>
 
-      {typeof document !== "undefined" &&
-      isCustomerDropdownOpen &&
-      customerMenuRect ? (
+      {isHydrated && isCustomerDropdownOpen && customerMenuRect ? (
         createPortal(
           <div
             className="customer-picker__menu"
@@ -1189,6 +1225,7 @@ export default function Index() {
         id="create-customer-modal"
         ref={createCustomerModalRef}
         heading="Create a new customer"
+        accessibilityLabel="Create a new customer"
         size="base"
       >
         <s-stack direction="block" gap="base">
