@@ -1,4 +1,3 @@
-import type { HeadersFunction } from "react-router";
 import {
   Links,
   Meta,
@@ -8,11 +7,6 @@ import {
   useRouteError,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { addDocumentResponseHeaders } from "./shopify.server";
-
-export const headers: HeadersFunction = (headersArgs) => {
-  return addDocumentResponseHeaders(headersArgs);
-};
 
 export default function App() {
   return (
