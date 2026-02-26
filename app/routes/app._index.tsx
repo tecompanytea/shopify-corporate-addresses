@@ -192,6 +192,11 @@ const CUSTOMER_PICKER_STYLES = `
 
 .Polaris-Layout__Section {
   min-width: 0;
+  overflow: visible;
+}
+
+.Polaris-Layout__Section--oneThird {
+  overflow: visible;
 }
 
 @container (inline-size <= 900px) {
@@ -202,6 +207,7 @@ const CUSTOMER_PICKER_STYLES = `
 
 .customer-picker {
   position: relative;
+  z-index: 40;
 }
 
 .customer-picker__menu {
@@ -209,16 +215,17 @@ const CUSTOMER_PICKER_STYLES = `
   inset-inline-start: 0;
   inset-inline-end: 0;
   top: calc(100% + 4px);
-  z-index: 30;
+  z-index: 9999;
   background: var(--p-color-bg-surface, #fff);
   border: 1px solid var(--p-color-border, #d1d5db);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   overflow: hidden;
+  max-height: 320px;
 }
 
 .customer-picker__list {
-  max-height: 260px;
+  max-height: 280px;
   overflow-y: auto;
 }
 `;
@@ -296,13 +303,9 @@ const SHIPPING_REPORT_QUERY = `#graphql
             firstName
             lastName
           }
-          fulfillments(first: 20) {
-            edges {
-              node {
-                trackingInfo {
-                  number
-                }
-              }
+          fulfillments {
+            trackingInfo {
+              number
             }
           }
         }
@@ -1560,15 +1563,11 @@ async function generateShippingReport(
                 firstName?: string;
                 lastName?: string;
               } | null;
-              fulfillments?: {
-                edges?: Array<{
-                  node?: {
-                    trackingInfo?: Array<{
-                      number?: string | null;
-                    }>;
-                  };
+              fulfillments?: Array<{
+                trackingInfo?: Array<{
+                  number?: string | null;
                 }>;
-              };
+              }> | null;
             };
           }>;
         };
@@ -1597,8 +1596,8 @@ async function generateShippingReport(
       const fallbackName = recipientName || "No customer";
 
       const trackingNumbers: string[] = [];
-      for (const fulfillmentEdge of order.fulfillments?.edges ?? []) {
-        for (const info of fulfillmentEdge.node?.trackingInfo ?? []) {
+      for (const fulfillment of order.fulfillments ?? []) {
+        for (const info of fulfillment.trackingInfo ?? []) {
           const number = (info.number || "").trim();
           if (number) trackingNumbers.push(number);
         }
