@@ -885,6 +885,18 @@ export default function Index() {
 
   return (
     <s-page heading="CSV Order Importer">
+      {parseResult ? (
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          onClick={onCreateOrders}
+          {...(isCreating ? { loading: true } : {})}
+          disabled={!canCreate}
+        >
+          Create Orders
+        </s-button>
+      ) : null}
+
       <style>{CUSTOMER_PICKER_STYLES}</style>
 
       {importResult?.error ? (
@@ -947,50 +959,44 @@ export default function Index() {
             </s-section>
 
             {parseResult ? (
-              <s-section heading="Parsed CSV Data" padding="none">
+              <s-section heading="Parsed CSV Data">
                 <s-box padding="base">
                   <s-stack gap="base" direction="block">
                     <s-text color="subdued">
                       {parseResult.rowCount} rows ready to import
                     </s-text>
-                    <s-button
-                      variant="primary"
-                      onClick={onCreateOrders}
-                      {...(isCreating ? { loading: true } : {})}
-                      disabled={!canCreate}
-                    >
-                      Create Orders
-                    </s-button>
                   </s-stack>
                 </s-box>
 
-                <s-table>
-                  <s-table-header-row>
-                    <s-table-header listSlot="kicker">Row</s-table-header>
-                    <s-table-header listSlot="primary">First Name</s-table-header>
-                    <s-table-header listSlot="labeled">Last Name</s-table-header>
-                    <s-table-header listSlot="labeled">Address</s-table-header>
-                    <s-table-header listSlot="labeled">City</s-table-header>
-                    <s-table-header listSlot="labeled">State</s-table-header>
-                    <s-table-header listSlot="labeled">Zip Code</s-table-header>
-                  </s-table-header-row>
-                  <s-table-body>
-                    {previewRows.map((row) => {
-                      const [firstName, ...lastParts] = row.recipient.split(" ");
-                      return (
-                        <s-table-row key={row.rowNumber}>
-                          <s-table-cell>{row.rowNumber}</s-table-cell>
-                          <s-table-cell>{firstName || "-"}</s-table-cell>
-                          <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
-                          <s-table-cell>{row.address || "-"}</s-table-cell>
-                          <s-table-cell>{row.city || "-"}</s-table-cell>
-                          <s-table-cell>{row.state || "-"}</s-table-cell>
-                          <s-table-cell>{row.zipCode || "-"}</s-table-cell>
-                        </s-table-row>
-                      );
-                    })}
-                  </s-table-body>
-                </s-table>
+                <s-box padding="base">
+                  <s-table>
+                    <s-table-header-row>
+                      <s-table-header listSlot="kicker">Row</s-table-header>
+                      <s-table-header listSlot="primary">First Name</s-table-header>
+                      <s-table-header listSlot="labeled">Last Name</s-table-header>
+                      <s-table-header listSlot="labeled">Address</s-table-header>
+                      <s-table-header listSlot="labeled">City</s-table-header>
+                      <s-table-header listSlot="labeled">State</s-table-header>
+                      <s-table-header listSlot="labeled">Zip Code</s-table-header>
+                    </s-table-header-row>
+                    <s-table-body>
+                      {previewRows.map((row) => {
+                        const [firstName, ...lastParts] = row.recipient.split(" ");
+                        return (
+                          <s-table-row key={row.rowNumber}>
+                            <s-table-cell>{row.rowNumber}</s-table-cell>
+                            <s-table-cell>{firstName || "-"}</s-table-cell>
+                            <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
+                            <s-table-cell>{row.address || "-"}</s-table-cell>
+                            <s-table-cell>{row.city || "-"}</s-table-cell>
+                            <s-table-cell>{row.state || "-"}</s-table-cell>
+                            <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                          </s-table-row>
+                        );
+                      })}
+                    </s-table-body>
+                  </s-table>
+                </s-box>
               </s-section>
             ) : null}
 
