@@ -207,10 +207,6 @@ const CUSTOMER_PICKER_STYLES = `
   overflow-y: auto;
 }
 
-.customer-picker__status {
-  padding: 8px 12px;
-}
-
 .customer-picker__menu [data-customer-row="true"][data-active="true"] {
   background: var(--p-color-bg-fill-tertiary, #f3f4f6);
 }
@@ -224,14 +220,17 @@ const CUSTOMER_PICKER_STYLES = `
 .customer-picker__create-icon {
   width: 16px;
   height: 16px;
-  border-radius: 999px;
-  border: 1px solid var(--p-color-border, #d1d5db);
   color: var(--p-color-text-subdued, #6b7280);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  line-height: 1;
+}
+
+.customer-picker__create-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: currentColor;
 }
 `;
 
@@ -1183,19 +1182,19 @@ export default function Index() {
               <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
                 <span className="customer-picker__create-content">
                   <span className="customer-picker__create-icon" aria-hidden="true">
-                    +
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+                      <path d="M4.25 8a.75.75 0 0 1 .75-.75h2.25v-2.25a.75.75 0 0 1 1.5 0v2.25h2.25a.75.75 0 0 1 0 1.5h-2.25v2.25a.75.75 0 0 1-1.5 0v-2.25h-2.25a.75.75 0 0 1-.75-.75" />
+                      <path
+                        fillRule="evenodd"
+                        d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14m0-1.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 1 0 0 11"
+                      />
+                    </svg>
                   </span>
-                  <s-text type="strong">Create a new customer</s-text>
+                  <s-text>Create a new customer</s-text>
                 </span>
               </s-clickable>
             </div>
             <s-divider />
-            <div className="customer-picker__status">
-              <s-text color="subdued">
-                {filteredCustomers.length}{" "}
-                {filteredCustomers.length === 1 ? "customer" : "customers"} found
-              </s-text>
-            </div>
             <div className="customer-picker__list">
               {filteredCustomers.length === 0 ? (
                 <s-box padding="small">
@@ -1690,7 +1689,6 @@ async function searchCustomers(
       return {
         type: "search",
         customers: [],
-        warning: "No customer found. Create one below.",
       };
     }
 
