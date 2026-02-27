@@ -1003,6 +1003,17 @@ export default function Index() {
 
         <div className="Polaris-Layout__Section Polaris-Layout__Section--oneThird">
           <s-stack direction="block" gap="base">
+            <s-section heading="Shipping Report">
+              <s-stack gap="base" direction="block">
+                <s-text color="subdued">
+                  You will be able to select the particular data items to export.
+                </s-text>
+                <s-button variant="primary" href="/app/report">
+                  New Report
+                </s-button>
+              </s-stack>
+            </s-section>
+
             <s-section heading="Order Settings">
               <s-stack direction="block" gap="base">
                 <div className="customer-picker" ref={customerPickerRef}>
@@ -1035,17 +1046,6 @@ export default function Index() {
                   Add tags to all imported orders. Separate multiple tags with
                   commas.
                 </s-text>
-              </s-stack>
-            </s-section>
-
-            <s-section heading="Shipping Report">
-              <s-stack gap="base" direction="block">
-                <s-text color="subdued">
-                  You will be able to select the particular data items to export.
-                </s-text>
-                <s-button variant="secondary" href="/app/report">
-                  New Report
-                </s-button>
               </s-stack>
             </s-section>
           </s-stack>
