@@ -180,6 +180,7 @@ const DEFAULT_LINE_ITEM_TITLE = "Corporate Gift";
 const DEFAULT_LINE_ITEM_PRICE = "0.00";
 const DEFAULT_LINE_ITEM_CURRENCY = "USD";
 const DEFAULT_LINE_ITEM_QUANTITY = 1;
+const ORDER_TAG_SCAN_MAX_PAGES = 40;
 
 const CUSTOMER_PICKER_STYLES = `
 .Polaris-Layout {
@@ -478,7 +479,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let after: string | null = null;
     let hasNextPage = true;
     let pagesLoaded = 0;
-    const maxPages = 8;
+    const maxPages = ORDER_TAG_SCAN_MAX_PAGES;
 
     while (hasNextPage && pagesLoaded < maxPages) {
       const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY, {
@@ -716,7 +717,7 @@ export default function Index() {
     shouldSearchCustomers &&
     (isCustomerSearchQueued || customerSearchFetcher.state !== "idle");
   const trimmedOrderTagQuery = orderTagInputValue.trim();
-  const shouldSearchOrderTags = trimmedOrderTagQuery.length >= 2;
+  const shouldSearchOrderTags = trimmedOrderTagQuery.length >= 1;
   const isSearchingOrderTags =
     shouldSearchOrderTags &&
     (isOrderTagSearchQueued ||
@@ -831,7 +832,7 @@ export default function Index() {
   useEffect(() => {
     const query = orderTagInputValue.trim();
 
-    if (query.length < 2) {
+    if (query.length < 1) {
       setIsOrderTagSearchQueued(false);
       setOrderTagSearchQuery("");
       setOrderTagSearchResults([]);
@@ -996,7 +997,7 @@ export default function Index() {
 
     const localRanked = rankOrderTagList(query, orderTagSuggestions, 200);
     const hasFreshServerResults =
-      query.length >= 2 &&
+      query.length >= 1 &&
       orderTagSearchQuery === orderTagInputValue.trim() &&
       orderTagSearchResults.length > 0;
 
@@ -2312,7 +2313,7 @@ async function searchOrderTags(
   formData: FormData,
 ): Promise<OrderTagSearchActionData> {
   const queryRaw = (formData.get("query") as string | null)?.trim() || "";
-  if (queryRaw.length < 2) {
+  if (queryRaw.length < 1) {
     return {
       type: "search_order_tags",
       query: queryRaw,
@@ -2332,7 +2333,7 @@ async function searchOrderTags(
     let after: string | null = null;
     let hasNextPage = true;
     let pagesLoaded = 0;
-    const maxPages = 8;
+    const maxPages = ORDER_TAG_SCAN_MAX_PAGES;
 
     while (hasNextPage && pagesLoaded < maxPages) {
       const response = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {

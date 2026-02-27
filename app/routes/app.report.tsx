@@ -113,6 +113,7 @@ const REPORT_TAG_PICKER_STYLES = `
   fill: currentColor;
 }
 `;
+const REPORT_TAG_SCAN_MAX_PAGES = 40;
 
 const SHIPPING_REPORT_QUERY = `#graphql
   query ShippingReportOrders($query: String) {
@@ -188,7 +189,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let after: string | null = null;
     let hasNextPage = true;
     let pagesLoaded = 0;
-    const maxPages = 8;
+    const maxPages = REPORT_TAG_SCAN_MAX_PAGES;
 
     while (hasNextPage && pagesLoaded < maxPages) {
       const response = await admin.graphql(REPORT_TAG_SUGGESTIONS_QUERY, {
@@ -316,7 +317,7 @@ export default function ReportPage() {
 
   const isGeneratingReport = reportFetcher.state === "submitting";
   const trimmedReportTagQuery = reportTagInputValue.trim();
-  const shouldSearchReportTags = trimmedReportTagQuery.length >= 2;
+  const shouldSearchReportTags = trimmedReportTagQuery.length >= 1;
   const isSearchingReportTags =
     shouldSearchReportTags &&
     (isReportTagSearchQueued ||
@@ -351,7 +352,7 @@ export default function ReportPage() {
   useEffect(() => {
     const query = reportTagInputValue.trim();
 
-    if (query.length < 2) {
+    if (query.length < 1) {
       setIsReportTagSearchQueued(false);
       setReportTagSearchQuery("");
       setReportTagSearchResults([]);
@@ -401,7 +402,7 @@ export default function ReportPage() {
 
     const localRanked = rankTagListByPrefix(query, reportTagSuggestions, 200);
     const hasFreshServerResults =
-      query.length >= 2 &&
+      query.length >= 1 &&
       reportTagSearchQuery === reportTagInputValue.trim() &&
       reportTagSearchResults.length > 0;
 
@@ -849,7 +850,7 @@ async function searchReportTags(
   formData: FormData,
 ): Promise<ReportTagSearchActionData> {
   const queryRaw = (formData.get("query") as string | null)?.trim() || "";
-  if (queryRaw.length < 2) {
+  if (queryRaw.length < 1) {
     return {
       type: "search_report_tags",
       query: queryRaw,
@@ -869,7 +870,7 @@ async function searchReportTags(
     let after: string | null = null;
     let hasNextPage = true;
     let pagesLoaded = 0;
-    const maxPages = 8;
+    const maxPages = REPORT_TAG_SCAN_MAX_PAGES;
 
     while (hasNextPage && pagesLoaded < maxPages) {
       const response = await admin.graphql(SEARCH_REPORT_TAGS_QUERY, {
