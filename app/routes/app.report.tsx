@@ -92,6 +92,13 @@ const REPORT_TAG_PICKER_STYLES = `
   display: block;
   fill: currentColor;
 }
+
+.report-results__loading {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 `;
 
 const SHIPPING_REPORT_QUERY = `#graphql
@@ -670,48 +677,57 @@ export default function ReportPage() {
           </s-stack>
         </s-section>
 
-        {reportOrders.length > 0 ? (
+        {isGeneratingReport || reportOrders.length > 0 ? (
           <s-section padding="none">
-            <s-table>
-              <s-search-field
-                slot="filters"
-                label="Search shipping report results"
-                placeholder="Search by order number, customer, or tracking"
-                value={reportTableQuery}
-                onInput={(event: Event) => {
-                  const target = event.currentTarget as HTMLElement & {
-                    value?: string;
-                  };
-                  setReportTableQuery(target.value || "");
-                }}
-              />
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Order Number</s-table-header>
-                <s-table-header listSlot="labeled">Customer Name</s-table-header>
-                <s-table-header listSlot="labeled">Tracking Numbers</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {filteredReportRows.length === 0 ? (
-                  <s-table-row>
-                    <s-table-cell>No matching orders.</s-table-cell>
-                    <s-table-cell>-</s-table-cell>
-                    <s-table-cell>-</s-table-cell>
-                  </s-table-row>
-                ) : (
-                  filteredReportRows.map((order) => (
-                    <s-table-row key={order.id}>
-                      <s-table-cell>{order.name}</s-table-cell>
-                      <s-table-cell>{order.customerName}</s-table-cell>
-                      <s-table-cell>
-                        {order.trackingNumbers.length > 0
-                          ? order.trackingNumbers.join(", ")
-                          : "No tracking"}
-                      </s-table-cell>
+            {isGeneratingReport ? (
+              <div className="report-results__loading">
+                <s-stack direction="inline" gap="small">
+                  <s-spinner accessibilityLabel="Generating report" size="base" />
+                  <s-text color="subdued">Generating report...</s-text>
+                </s-stack>
+              </div>
+            ) : (
+              <s-table>
+                <s-search-field
+                  slot="filters"
+                  label="Search shipping report results"
+                  placeholder="Search by order number, customer, or tracking"
+                  value={reportTableQuery}
+                  onInput={(event: Event) => {
+                    const target = event.currentTarget as HTMLElement & {
+                      value?: string;
+                    };
+                    setReportTableQuery(target.value || "");
+                  }}
+                />
+                <s-table-header-row>
+                  <s-table-header listSlot="primary">Order Number</s-table-header>
+                  <s-table-header listSlot="labeled">Customer Name</s-table-header>
+                  <s-table-header listSlot="labeled">Tracking Numbers</s-table-header>
+                </s-table-header-row>
+                <s-table-body>
+                  {filteredReportRows.length === 0 ? (
+                    <s-table-row>
+                      <s-table-cell>No matching orders.</s-table-cell>
+                      <s-table-cell>-</s-table-cell>
+                      <s-table-cell>-</s-table-cell>
                     </s-table-row>
-                  ))
-                )}
-              </s-table-body>
-            </s-table>
+                  ) : (
+                    filteredReportRows.map((order) => (
+                      <s-table-row key={order.id}>
+                        <s-table-cell>{order.name}</s-table-cell>
+                        <s-table-cell>{order.customerName}</s-table-cell>
+                        <s-table-cell>
+                          {order.trackingNumbers.length > 0
+                            ? order.trackingNumbers.join(", ")
+                            : "No tracking"}
+                        </s-table-cell>
+                      </s-table-row>
+                    ))
+                  )}
+                </s-table-body>
+              </s-table>
+            )}
           </s-section>
         ) : null}
 
