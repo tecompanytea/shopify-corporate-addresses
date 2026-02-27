@@ -2324,7 +2324,7 @@ async function searchOrderTags(
     .split(/\s+/)
     .map((token) => token.trim())
     .filter(Boolean)
-    .map((token) => `tag:'${escapeSearchValue(token)}*'`);
+    .map((token) => `tag:${escapeSearchToken(token)}*`);
   const searchQuery = searchTokens.join(" AND ");
 
   try {
@@ -2552,6 +2552,10 @@ function escapeSearchValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
+function escapeSearchToken(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/([:\\()])/g, "\\$1");
+}
+
 function mergeCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
   const byId = new Map<string, CustomerOption>();
 
@@ -2580,7 +2584,16 @@ function rankOrderTags(
 ): string[] {
   const normalizedQuery = query.trim().toLowerCase();
 
-  const ranked = Array.from(tagCounts.entries()).sort((a, b) => {
+  const matchingEntries = Array.from(tagCounts.entries()).filter(([tag]) => {
+    if (!normalizedQuery) return true;
+    const lower = tag.toLowerCase();
+    return (
+      lower.startsWith(normalizedQuery) ||
+      lower.includes(normalizedQuery)
+    );
+  });
+
+  const ranked = matchingEntries.sort((a, b) => {
     const aTag = a[0];
     const bTag = b[0];
     const aCount = a[1];
@@ -2618,9 +2631,12 @@ function rankOrderTagList(query: string, tags: string[], max: number): string[] 
     deduped.push(tag);
   }
 
+  if (!normalizedQuery) {
+    return deduped.slice(0, max);
+  }
+
   const startsWith: string[] = [];
   const includes: string[] = [];
-  const others: string[] = [];
 
   for (const tag of deduped) {
     const lower = tag.toLowerCase();
@@ -2628,12 +2644,10 @@ function rankOrderTagList(query: string, tags: string[], max: number): string[] 
       startsWith.push(tag);
     } else if (lower.includes(normalizedQuery)) {
       includes.push(tag);
-    } else {
-      others.push(tag);
     }
   }
 
-  return [...startsWith, ...includes, ...others].slice(0, max);
+  return [...startsWith, ...includes].slice(0, max);
 }
 
 function mergeUniqueTags(...groups: string[][]): string[] {
