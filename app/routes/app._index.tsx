@@ -365,6 +365,26 @@ const SEARCH_CUSTOMERS_QUERY = `#graphql
   }
 `;
 
+const DRAFT_ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
+  query DraftOrderTagSuggestions {
+    draftOrderTags(first: 250, sortKey: POPULAR) {
+      edges {
+        node
+      }
+    }
+  }
+`;
+
+const SEARCH_DRAFT_ORDER_TAGS_QUERY = `#graphql
+  query SearchDraftOrderTags($query: String!) {
+    draftOrderTags(first: 250, sortKey: POPULAR, query: $query) {
+      edges {
+        node
+      }
+    }
+  }
+`;
+
 const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
   query OrderTagSuggestions {
     shop {
@@ -2322,6 +2342,32 @@ async function loadShopOrderTags(
   if (query) {
     try {
       const searchQuery = `title:${escapeSearchToken(query)}*`;
+      const searched = await admin.graphql(SEARCH_DRAFT_ORDER_TAGS_QUERY, {
+        variables: { query: searchQuery },
+      });
+      const searchedJson = (await searched.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          draftOrderTags?: {
+            edges?: Array<{
+              node?: string | null;
+            }>;
+          } | null;
+        };
+      };
+
+      if (!searchedJson.errors || searchedJson.errors.length === 0) {
+        const tags = readTagConnectionValues(searchedJson.data?.draftOrderTags);
+        if (tags.length > 0) {
+          return { tags };
+        }
+      }
+    } catch {
+      // Continue to other sources.
+    }
+
+    try {
+      const searchQuery = `title:${escapeSearchToken(query)}*`;
       const searched = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
         variables: { query: searchQuery },
       });
@@ -2352,6 +2398,29 @@ async function loadShopOrderTags(
     }
 
     return loadOrderTagsFromOrders(admin, query);
+  }
+
+  try {
+    const response = await admin.graphql(DRAFT_ORDER_TAG_SUGGESTIONS_QUERY);
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        draftOrderTags?: {
+          edges?: Array<{
+            node?: string | null;
+          }>;
+        } | null;
+      };
+    };
+
+    if (!json.errors || json.errors.length === 0) {
+      const tags = readTagConnectionValues(json.data?.draftOrderTags);
+      if (tags.length > 0) {
+        return { tags };
+      }
+    }
+  } catch {
+    // Continue to other sources.
   }
 
   try {
