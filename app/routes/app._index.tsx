@@ -236,6 +236,77 @@ const CUSTOMER_PICKER_STYLES = `
   display: block;
   fill: currentColor;
 }
+
+.order-tag-picker {
+  position: relative;
+  z-index: 35;
+}
+
+.order-tag-picker__menu {
+  position: fixed;
+  z-index: 2147483646;
+  background: var(--p-color-bg-surface, #fff);
+  border: 1px solid var(--p-color-border, #d1d5db);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  max-height: min(320px, calc(100vh - 24px));
+}
+
+.order-tag-picker__list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.order-tag-picker__menu [data-order-tag-row="true"]:hover {
+  background: var(--p-color-bg-fill-tertiary, #f3f4f6);
+}
+
+.order-tag-picker__action-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.order-tag-picker__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--p-color-text-subdued, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.order-tag-picker__icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: currentColor;
+}
+
+.order-tag-picker__checkbox {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--p-color-border, #d1d5db);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.order-tag-picker__checkbox--checked {
+  border-color: var(--p-color-bg-fill-emphasis, #111827);
+  background: var(--p-color-bg-fill-emphasis, #111827);
+  color: var(--p-color-text-on-fill, #fff);
+}
+
+.order-tag-picker__checkbox svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  fill: currentColor;
+}
 `;
 
 const ORDER_CREATE_MUTATION = `#graphql
@@ -281,6 +352,18 @@ const SEARCH_CUSTOMERS_QUERY = `#graphql
   }
 `;
 
+const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
+  query OrderTagSuggestions {
+    orders(first: 100, sortKey: CREATED_AT, reverse: true) {
+      edges {
+        node {
+          tags
+        }
+      }
+    }
+  }
+`;
+
 const CUSTOMER_CREATE_MUTATION = `#graphql
   mutation CustomerCreateForImporter($input: CustomerInput!) {
     customerCreate(input: $input) {
@@ -302,6 +385,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const customers: CustomerOption[] = [];
   let customerLoadWarning = "";
+  const orderTagSuggestions: string[] = [];
+  let orderTagLoadWarning = "";
 
   try {
     const response = await admin.graphql(CUSTOMERS_QUERY);
@@ -345,9 +430,56 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       "Unable to load customers right now. Customer selector may be incomplete.";
   }
 
+  try {
+    const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY);
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        orders?: {
+          edges?: Array<{
+            node?: {
+              tags?: string[] | null;
+            };
+          }>;
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      orderTagLoadWarning = `Unable to load order tag suggestions: ${json.errors
+        .map((error) => error.message)
+        .join("; ")}`;
+    } else {
+      const tagCounts = new Map<string, number>();
+
+      for (const edge of json.data?.orders?.edges ?? []) {
+        for (const tag of edge.node?.tags ?? []) {
+          const normalized = tag.trim();
+          if (!normalized) continue;
+          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
+        }
+      }
+
+      const sortedTags = Array.from(tagCounts.entries())
+        .sort((a, b) => {
+          if (b[1] !== a[1]) return b[1] - a[1];
+          return a[0].localeCompare(b[0], "en");
+        })
+        .map(([tag]) => tag)
+        .slice(0, 100);
+
+      orderTagSuggestions.push(...sortedTags);
+    }
+  } catch {
+    orderTagLoadWarning =
+      "Unable to load order tag suggestions right now. You can still add tags manually.";
+  }
+
   return {
     customers,
     customerLoadWarning,
+    orderTagSuggestions,
+    orderTagLoadWarning,
   };
 };
 
@@ -445,7 +577,12 @@ export function HydrateFallback() {
 }
 
 export default function Index() {
-  const { customers, customerLoadWarning } = useLoaderData<typeof loader>();
+  const {
+    customers,
+    customerLoadWarning,
+    orderTagSuggestions,
+    orderTagLoadWarning,
+  } = useLoaderData<typeof loader>();
   const createFetcher = useFetcher<CreateActionData>();
   const customerSearchFetcher = useFetcher<CustomerActionData>();
   const customerCreateFetcher = useFetcher<CustomerActionData>();
@@ -470,7 +607,9 @@ export default function Index() {
   const [customerError, setCustomerError] = useState("");
   const [isCustomerSearchQueued, setIsCustomerSearchQueued] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [orderTagsInput, setOrderTagsInput] = useState("");
+  const [selectedOrderTags, setSelectedOrderTags] = useState<string[]>([]);
+  const [orderTagInputValue, setOrderTagInputValue] = useState("");
+  const [isOrderTagDropdownOpen, setIsOrderTagDropdownOpen] = useState(false);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -481,11 +620,18 @@ export default function Index() {
     left: number;
     width: number;
   } | null>(null);
+  const [orderTagMenuRect, setOrderTagMenuRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const createCustomerModalRef = useRef<HTMLElementTagNameMap["s-modal"] | null>(
     null,
   );
   const customerPickerRef = useRef<HTMLDivElement | null>(null);
   const customerMenuRef = useRef<HTMLDivElement | null>(null);
+  const orderTagPickerRef = useRef<HTMLDivElement | null>(null);
+  const orderTagMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
   const isCreatingCustomer = customerCreateFetcher.state === "submitting";
@@ -646,6 +792,53 @@ export default function Index() {
     };
   }, [isCustomerDropdownOpen]);
 
+  useEffect(() => {
+    if (!isOrderTagDropdownOpen) return;
+
+    updateOrderTagMenuPosition();
+
+    const onWindowChange = () => {
+      updateOrderTagMenuPosition();
+    };
+
+    window.addEventListener("resize", onWindowChange);
+    window.addEventListener("scroll", onWindowChange, true);
+
+    return () => {
+      window.removeEventListener("resize", onWindowChange);
+      window.removeEventListener("scroll", onWindowChange, true);
+    };
+  }, [isOrderTagDropdownOpen, orderTagInputValue]);
+
+  useEffect(() => {
+    if (!isOrderTagDropdownOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const picker = orderTagPickerRef.current;
+      const menu = orderTagMenuRef.current;
+      const target = event.target as Node | null;
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const insidePicker = picker
+        ? path.includes(picker) || (target ? picker.contains(target) : false)
+        : false;
+      const insideMenu = menu
+        ? path.includes(menu) || (target ? menu.contains(target) : false)
+        : false;
+
+      if (insidePicker || insideMenu) {
+        return;
+      }
+
+      setIsOrderTagDropdownOpen(false);
+      setOrderTagMenuRect(null);
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [isOrderTagDropdownOpen]);
+
   const filteredCustomers = useMemo(() => {
     const query = customerInputValue.trim().toLowerCase();
     const list = sortCustomerOptions(customerOptions);
@@ -671,6 +864,34 @@ export default function Index() {
       Math.max(0, Math.min(current, customerMenuOptionCount - 1)),
     );
   }, [isCustomerDropdownOpen, customerMenuOptionCount]);
+
+  const filteredOrderTagSuggestions = useMemo(() => {
+    const query = orderTagInputValue.trim().toLowerCase();
+
+    if (!query) {
+      return orderTagSuggestions.slice(0, 50);
+    }
+
+    return orderTagSuggestions
+      .filter((tag) => tag.toLowerCase().includes(query))
+      .slice(0, 50);
+  }, [orderTagInputValue, orderTagSuggestions]);
+
+  const canAddTypedOrderTag = useMemo(() => {
+    const value = orderTagInputValue.trim();
+    if (!value) return false;
+
+    const normalized = value.toLowerCase();
+    const alreadySelected = selectedOrderTags.some(
+      (tag) => tag.toLowerCase() === normalized,
+    );
+    if (alreadySelected) return false;
+
+    const alreadyExists = orderTagSuggestions.some(
+      (tag) => tag.toLowerCase() === normalized,
+    );
+    return !alreadyExists;
+  }, [orderTagInputValue, orderTagSuggestions, selectedOrderTags]);
 
   const updateCustomerMenuPosition = () => {
     const anchor = customerPickerRef.current;
@@ -699,6 +920,39 @@ export default function Index() {
         );
 
     setCustomerMenuRect({
+      top,
+      left,
+      width,
+    });
+  };
+
+  const updateOrderTagMenuPosition = () => {
+    const anchor = orderTagPickerRef.current;
+    if (!anchor) {
+      setOrderTagMenuRect(null);
+      return;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 8;
+    const menuMaxHeight = Math.min(320, window.innerHeight - 24);
+    const width = Math.max(rect.width, 280);
+    const maxLeft = Math.max(
+      viewportPadding,
+      window.innerWidth - width - viewportPadding,
+    );
+    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
+    const shouldOpenUpwards =
+      rect.bottom + 4 + menuMaxHeight > window.innerHeight - viewportPadding &&
+      rect.top - 4 - menuMaxHeight > viewportPadding;
+    const top = shouldOpenUpwards
+      ? Math.max(viewportPadding, rect.top - menuMaxHeight - 4)
+      : Math.min(
+          window.innerHeight - menuMaxHeight - viewportPadding,
+          rect.bottom + 4,
+        );
+
+    setOrderTagMenuRect({
       top,
       left,
       width,
@@ -890,10 +1144,85 @@ export default function Index() {
     customerCreateFetcher.submit(formData, { method: "POST" });
   };
 
+  const onOrderTagFieldInput = (event: Event) => {
+    const target = event.currentTarget as HTMLElement & { value?: string };
+    const value = target.value || "";
+    setOrderTagInputValue(value);
+    setIsOrderTagDropdownOpen(true);
+    updateOrderTagMenuPosition();
+  };
+
+  const onOrderTagFieldFocus = () => {
+    setIsOrderTagDropdownOpen(true);
+    updateOrderTagMenuPosition();
+  };
+
+  const onToggleOrderTag = (tag: string) => {
+    setSelectedOrderTags((existing) => {
+      const existingIndex = existing.findIndex(
+        (item) => item.toLowerCase() === tag.toLowerCase(),
+      );
+      if (existingIndex >= 0) {
+        return existing.filter((_, index) => index !== existingIndex);
+      }
+      return [...existing, tag];
+    });
+  };
+
+  const onRemoveOrderTag = (tag: string) => {
+    setSelectedOrderTags((existing) =>
+      existing.filter((item) => item.toLowerCase() !== tag.toLowerCase()),
+    );
+  };
+
+  const onAddTypedOrderTag = () => {
+    const value = orderTagInputValue.trim();
+    if (!value) return;
+
+    setSelectedOrderTags((existing) => {
+      if (existing.some((item) => item.toLowerCase() === value.toLowerCase())) {
+        return existing;
+      }
+      return [...existing, value];
+    });
+    setOrderTagInputValue("");
+    setIsOrderTagDropdownOpen(true);
+    updateOrderTagMenuPosition();
+  };
+
+  useEffect(() => {
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      const picker = orderTagPickerRef.current;
+      const target = event.target as Node | null;
+
+      if (!picker || !target || !picker.contains(target)) {
+        return;
+      }
+
+      if (event.key === "Escape" && isOrderTagDropdownOpen) {
+        event.preventDefault();
+        setIsOrderTagDropdownOpen(false);
+        setOrderTagMenuRect(null);
+      }
+
+      if (event.key === "Enter") {
+        if (canAddTypedOrderTag) {
+          event.preventDefault();
+          onAddTypedOrderTag();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, [canAddTypedOrderTag, isOrderTagDropdownOpen, onAddTypedOrderTag]);
+
   const onCreateOrders = () => {
     if (!parseResult || !canCreate) return;
 
-    const globalTags = parseTags(orderTagsInput);
+    const globalTags = selectedOrderTags.length > 0 ? selectedOrderTags : undefined;
 
     const ordersWithSettings = parseResult.orders.map((order) => ({
       ...order,
@@ -963,6 +1292,10 @@ export default function Index() {
 
       {customerLoadWarning ? (
         <s-banner tone="warning">{customerLoadWarning}</s-banner>
+      ) : null}
+
+      {orderTagLoadWarning ? (
+        <s-banner tone="warning">{orderTagLoadWarning}</s-banner>
       ) : null}
 
       {customerError ? <s-banner tone="critical">{customerError}</s-banner> : null}
@@ -1155,20 +1488,32 @@ export default function Index() {
                   to each recipient address.
                 </s-text>
 
-                <s-text-field
-                  label="Order Tags (optional)"
-                  placeholder="e.g., imported, bulk-order"
-                  value={orderTagsInput}
-                  onInput={(event: Event) => {
-                    const target = event.currentTarget as HTMLElement & {
-                      value?: string;
-                    };
-                    setOrderTagsInput(target.value || "");
-                  }}
-                />
+                <div className="order-tag-picker" ref={orderTagPickerRef}>
+                  <s-search-field
+                    label="Order Tags (optional)"
+                    placeholder="Search tags or add a new tag"
+                    value={orderTagInputValue}
+                    onInput={onOrderTagFieldInput}
+                    onFocus={onOrderTagFieldFocus}
+                  />
+                </div>
+                {selectedOrderTags.length > 0 ? (
+                  <s-stack direction="inline" gap="small">
+                    {selectedOrderTags.map((tag) => (
+                      <s-clickable-chip
+                        key={tag}
+                        color="strong"
+                        accessibilityLabel={`Remove tag ${tag}`}
+                        removable
+                        onRemove={() => onRemoveOrderTag(tag)}
+                      >
+                        {tag}
+                      </s-clickable-chip>
+                    ))}
+                  </s-stack>
+                ) : null}
                 <s-text color="subdued">
-                  Add tags to all imported orders. Separate multiple tags with
-                  commas.
+                  Add tags to all imported orders.
                 </s-text>
               </s-stack>
             </s-section>
@@ -1254,6 +1599,80 @@ export default function Index() {
                       </s-clickable>
                     </div>
                   </s-box>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body,
+        )
+      ) : null}
+
+      {isHydrated && isOrderTagDropdownOpen && orderTagMenuRect ? (
+        createPortal(
+          <div
+            ref={orderTagMenuRef}
+            className="order-tag-picker__menu"
+            style={{
+              top: `${orderTagMenuRect.top}px`,
+              left: `${orderTagMenuRect.left}px`,
+              width: `${orderTagMenuRect.width}px`,
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+          >
+            {canAddTypedOrderTag ? (
+              <>
+                <div data-order-tag-row="true">
+                  <s-clickable onClick={onAddTypedOrderTag} padding="small">
+                    <span className="order-tag-picker__action-content">
+                      <span className="order-tag-picker__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+                          <path d="M4.25 8a.75.75 0 0 1 .75-.75h2.25v-2.25a.75.75 0 0 1 1.5 0v2.25h2.25a.75.75 0 0 1 0 1.5h-2.25v2.25a.75.75 0 0 1-1.5 0v-2.25h-2.25a.75.75 0 0 1-.75-.75" />
+                          <path
+                            fillRule="evenodd"
+                            d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14m0-1.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 1 0 0 11"
+                          />
+                        </svg>
+                      </span>
+                      <s-text>
+                        <s-text type="strong">Add</s-text> {orderTagInputValue.trim()}
+                      </s-text>
+                    </span>
+                  </s-clickable>
+                </div>
+                <s-divider />
+              </>
+            ) : null}
+            <div className="order-tag-picker__list">
+              {filteredOrderTagSuggestions.length === 0 ? (
+                <s-box padding="small">
+                  <s-text color="subdued">No matching tags.</s-text>
+                </s-box>
+              ) : (
+                filteredOrderTagSuggestions.map((tag) => {
+                  const isSelected = selectedOrderTags.some(
+                    (value) => value.toLowerCase() === tag.toLowerCase(),
+                  );
+                  return (
+                    <div key={tag} data-order-tag-row="true">
+                      <s-clickable onClick={() => onToggleOrderTag(tag)} padding="small">
+                        <s-stack direction="inline" gap="small">
+                          <span
+                            className={`order-tag-picker__checkbox${isSelected ? " order-tag-picker__checkbox--checked" : ""}`}
+                            aria-hidden="true"
+                          >
+                            {isSelected ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+                                <path d="M6.53 10.78a.75.75 0 0 1-1.06 0l-1.75-1.75a.75.75 0 0 1 1.06-1.06l1.22 1.22 3.22-3.22a.75.75 0 0 1 1.06 1.06z" />
+                              </svg>
+                            ) : null}
+                          </span>
+                          <s-text>{tag}</s-text>
+                        </s-stack>
+                      </s-clickable>
+                    </div>
                   );
                 })
               )}
@@ -1501,17 +1920,6 @@ function buildPreviewRow(record: CsvRecord, rowNumber: number): CsvPreviewRow {
     zipCode: readColumn(record, "zip_code"),
     email: readColumn(record, "email"),
   };
-}
-
-function parseTags(value: string): string[] | undefined {
-  if (!value) return undefined;
-
-  const tags = value
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-
-  return tags.length > 0 ? tags : undefined;
 }
 
 function mergeTags(...tagGroups: Array<string[] | undefined>): string[] | undefined {
