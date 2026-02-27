@@ -180,7 +180,6 @@ const DEFAULT_LINE_ITEM_TITLE = "Corporate Gift";
 const DEFAULT_LINE_ITEM_PRICE = "0.00";
 const DEFAULT_LINE_ITEM_CURRENCY = "USD";
 const DEFAULT_LINE_ITEM_QUANTITY = 1;
-const ORDER_TAG_SCAN_MAX_PAGES = 10;
 
 const CUSTOMER_PICKER_STYLES = `
 .Polaris-Layout {
@@ -366,43 +365,24 @@ const SEARCH_CUSTOMERS_QUERY = `#graphql
 `;
 
 const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
-  query OrderTagSuggestions($after: String) {
-    orders(
-      first: 250
-      after: $after
-      sortKey: CREATED_AT
-      reverse: true
-    ) {
-      edges {
-        node {
-          tags
+  query OrderTagSuggestions {
+    shop {
+      orderTags(first: 250, sortKey: POPULAR) {
+        edges {
+          node
         }
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
       }
     }
   }
 `;
 
 const SEARCH_ORDER_TAGS_QUERY = `#graphql
-  query SearchOrderTags($query: String!, $after: String) {
-    orders(
-      first: 250
-      query: $query
-      after: $after
-      sortKey: CREATED_AT
-      reverse: true
-    ) {
-      edges {
-        node {
-          tags
+  query SearchOrderTags($query: String!) {
+    shop {
+      orderTags(first: 250, sortKey: POPULAR, query: $query) {
+        edges {
+          node
         }
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
       }
     }
   }
@@ -475,68 +455,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   try {
-    const tagCounts = new Map<string, number>();
-    let after: string | null = null;
-    let hasNextPage = true;
-    let pagesLoaded = 0;
-    const maxPages = ORDER_TAG_SCAN_MAX_PAGES;
-
-    while (hasNextPage && pagesLoaded < maxPages) {
-      const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY, {
-        variables: {
-          after,
-        },
-      });
-      const json = (await response.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          orders?: {
-            edges?: Array<{
-              node?: {
-                tags?: string[] | null;
-              };
-            }>;
-            pageInfo?: {
-              hasNextPage?: boolean;
-              endCursor?: string | null;
-            };
-          };
-        };
-      };
-
-      if (json.errors && json.errors.length > 0) {
-        orderTagLoadWarning = `Unable to load order tag suggestions: ${json.errors
-          .map((error) => error.message)
-          .join("; ")}`;
-        break;
-      }
-
-      for (const edge of json.data?.orders?.edges ?? []) {
-        for (const tag of edge.node?.tags ?? []) {
-          const normalized = tag.trim();
-          if (!normalized) continue;
-          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
-        }
-      }
-
-      pagesLoaded += 1;
-      const pageInfo = json.data?.orders?.pageInfo;
-      hasNextPage = Boolean(pageInfo?.hasNextPage);
-      after = pageInfo?.endCursor ?? null;
-      if (!after) {
-        hasNextPage = false;
-      }
+    const tagResult = await loadShopOrderTags(admin);
+    if (tagResult.error) {
+      orderTagLoadWarning = `Unable to load order tag suggestions: ${tagResult.error}`;
+    } else {
+      orderTagSuggestions.push(...tagResult.tags);
     }
-
-    const sortedTags = Array.from(tagCounts.entries())
-      .sort((a, b) => {
-        if (b[1] !== a[1]) return b[1] - a[1];
-        return a[0].localeCompare(b[0], "en");
-      })
-      .map(([tag]) => tag)
-      .slice(0, 500);
-
-    orderTagSuggestions.push(...sortedTags);
   } catch {
     orderTagLoadWarning =
       "Unable to load order tag suggestions right now. You can still add tags manually.";
@@ -2321,73 +2245,20 @@ async function searchOrderTags(
     };
   }
 
-  const searchTokens = queryRaw
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .map((token) => `tag:${escapeSearchToken(token)}*`);
-  const searchQuery = searchTokens.join(" AND ");
-
   try {
-    const tagCounts = new Map<string, number>();
-    let after: string | null = null;
-    let hasNextPage = true;
-    let pagesLoaded = 0;
-    const maxPages = ORDER_TAG_SCAN_MAX_PAGES;
-
-    while (hasNextPage && pagesLoaded < maxPages) {
-      const response = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
-        variables: {
-          query: searchQuery,
-          after,
-        },
-      });
-      const json = (await response.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          orders?: {
-            edges?: Array<{
-              node?: {
-                tags?: string[] | null;
-              };
-            }>;
-            pageInfo?: {
-              hasNextPage?: boolean;
-              endCursor?: string | null;
-            };
-          };
-        };
+    const tagResult = await loadShopOrderTags(admin, queryRaw);
+    if (tagResult.error) {
+      return {
+        type: "error",
+        query: queryRaw,
+        error: tagResult.error,
       };
-
-      if (json.errors && json.errors.length > 0) {
-        return {
-          type: "error",
-          query: queryRaw,
-          error: json.errors.map((error) => error.message).join("; "),
-        };
-      }
-
-      for (const edge of json.data?.orders?.edges ?? []) {
-        for (const tag of edge.node?.tags ?? []) {
-          const normalized = tag.trim();
-          if (!normalized) continue;
-          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
-        }
-      }
-
-      pagesLoaded += 1;
-      const pageInfo = json.data?.orders?.pageInfo;
-      hasNextPage = Boolean(pageInfo?.hasNextPage);
-      after = pageInfo?.endCursor ?? null;
-      if (!after) {
-        hasNextPage = false;
-      }
     }
 
     return {
       type: "search_order_tags",
       query: queryRaw,
-      tags: rankOrderTags(queryRaw, tagCounts, 100),
+      tags: rankOrderTagList(queryRaw, tagResult.tags, 100),
     };
   } catch (error) {
     return {
@@ -2397,6 +2268,103 @@ async function searchOrderTags(
         error instanceof Error ? error.message : "Failed to search order tags.",
     };
   }
+}
+
+async function loadShopOrderTags(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  rawQuery?: string,
+): Promise<{ tags: string[]; error?: string }> {
+  const query = rawQuery?.trim() || "";
+  if (query) {
+    const searchQuery = `title:${escapeSearchToken(query)}*`;
+    const searched = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
+      variables: { query: searchQuery },
+    });
+    const searchedJson = (await searched.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        shop?: {
+          orderTags?: {
+            edges?: Array<{
+              node?: string | null;
+            }>;
+          } | null;
+        } | null;
+      };
+    };
+
+    if (!searchedJson.errors || searchedJson.errors.length === 0) {
+      return {
+        tags: readTagConnectionValues(searchedJson.data?.shop?.orderTags),
+      };
+    }
+
+    const errorMessage = searchedJson.errors
+      .map((error) => error.message)
+      .join("; ");
+
+    if (!isUnsupportedTagQueryError(errorMessage)) {
+      return { tags: [], error: errorMessage };
+    }
+  }
+
+  const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY);
+  const json = (await response.json()) as {
+    errors?: Array<{ message: string }>;
+    data?: {
+      shop?: {
+        orderTags?: {
+          edges?: Array<{
+            node?: string | null;
+          }>;
+        } | null;
+      } | null;
+    };
+  };
+
+  if (json.errors && json.errors.length > 0) {
+    return {
+      tags: [],
+      error: json.errors.map((error) => error.message).join("; "),
+    };
+  }
+
+  return {
+    tags: readTagConnectionValues(json.data?.shop?.orderTags),
+  };
+}
+
+function readTagConnectionValues(
+  connection:
+    | {
+        edges?: Array<{
+          node?: string | null;
+        }>;
+      }
+    | null
+    | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const values: string[] = [];
+
+  for (const edge of connection?.edges ?? []) {
+    const tag = edge.node?.trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    values.push(tag);
+  }
+
+  return values;
+}
+
+function isUnsupportedTagQueryError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("unknown argument") ||
+    normalized.includes("doesn't accept argument")
+  );
 }
 
 async function createCustomer(
@@ -2576,39 +2544,6 @@ function sortCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
     const bLabel = (b.displayName || b.email || "").toLowerCase();
     return aLabel.localeCompare(bLabel, "en");
   });
-}
-
-function rankOrderTags(
-  query: string,
-  tagCounts: Map<string, number>,
-  max: number,
-): string[] {
-  const normalizedQuery = query.trim().toLowerCase();
-
-  const matchingEntries = Array.from(tagCounts.entries()).filter(([tag]) => {
-    if (!normalizedQuery) return true;
-    const lower = tag.toLowerCase();
-    return lower.startsWith(normalizedQuery);
-  });
-
-  const ranked = matchingEntries.sort((a, b) => {
-    const aTag = a[0];
-    const bTag = b[0];
-    const aCount = a[1];
-    const bCount = b[1];
-
-    const aLower = aTag.toLowerCase();
-    const bLower = bTag.toLowerCase();
-
-    const aStarts = aLower.startsWith(normalizedQuery);
-    const bStarts = bLower.startsWith(normalizedQuery);
-    if (aStarts !== bStarts) return aStarts ? -1 : 1;
-
-    if (aCount !== bCount) return bCount - aCount;
-    return aTag.localeCompare(bTag, "en");
-  });
-
-  return ranked.map(([tag]) => tag).slice(0, max);
 }
 
 function rankOrderTagList(query: string, tags: string[], max: number): string[] {
