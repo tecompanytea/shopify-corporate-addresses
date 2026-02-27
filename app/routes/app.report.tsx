@@ -67,28 +67,6 @@ const REPORT_TAG_PICKER_STYLES = `
   background: var(--p-color-bg-fill-tertiary, #f3f4f6);
 }
 
-.report-tag-picker__action-content {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.report-tag-picker__icon {
-  width: 16px;
-  height: 16px;
-  color: var(--p-color-text-subdued, #6b7280);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.report-tag-picker__icon svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-  fill: currentColor;
-}
-
 .report-tag-picker__checkbox {
   width: 16px;
   height: 16px;
@@ -348,22 +326,6 @@ export default function ReportPage() {
     reportTagSuggestions,
   ]);
 
-  const canAddTypedReportTag = useMemo(() => {
-    const value = reportTagInputValue.trim();
-    if (!value) return false;
-
-    const normalized = value.toLowerCase();
-    const alreadySelected = selectedReportTags.some(
-      (tag) => tag.toLowerCase() === normalized,
-    );
-    if (alreadySelected) return false;
-
-    const alreadyExists =
-      reportTagSuggestions.some((tag) => tag.toLowerCase() === normalized) ||
-      reportTagSearchResults.some((tag) => tag.toLowerCase() === normalized);
-    return !alreadyExists;
-  }, [reportTagInputValue, reportTagSearchResults, reportTagSuggestions, selectedReportTags]);
-
   const onGenerateReport = () => {
     const formData = new FormData();
     formData.append("intent", "generate_report");
@@ -492,21 +454,6 @@ export default function ReportPage() {
     });
   };
 
-  const onAddTypedReportTag = () => {
-    const value = reportTagInputValue.trim();
-    if (!value) return;
-
-    setSelectedReportTags((existing) => {
-      if (existing.some((item) => item.toLowerCase() === value.toLowerCase())) {
-        return existing;
-      }
-      return [...existing, value];
-    });
-    setReportTagInputValue("");
-    setIsReportTagDropdownOpen(false);
-    setReportTagMenuRect(null);
-  };
-
   const onRemoveReportTag = (tag: string) => {
     setSelectedReportTags((existing) =>
       existing.filter((item) => item.toLowerCase() !== tag.toLowerCase()),
@@ -528,19 +475,13 @@ export default function ReportPage() {
         setReportTagMenuRect(null);
       }
 
-      if (event.key === "Enter") {
-        if (canAddTypedReportTag) {
-          event.preventDefault();
-          onAddTypedReportTag();
-        }
-      }
     };
 
     document.addEventListener("keydown", onDocumentKeyDown);
     return () => {
       document.removeEventListener("keydown", onDocumentKeyDown);
     };
-  }, [canAddTypedReportTag, isReportTagDropdownOpen]);
+  }, [isReportTagDropdownOpen]);
 
   return (
     <s-page heading="Shipping Report">
@@ -696,29 +637,6 @@ export default function ReportPage() {
               event.preventDefault();
             }}
           >
-            {canAddTypedReportTag ? (
-              <>
-                <div data-report-tag-row="true">
-                  <s-clickable onClick={onAddTypedReportTag} padding="small">
-                    <span className="report-tag-picker__action-content">
-                      <span className="report-tag-picker__icon" aria-hidden="true">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-                          <path d="M4.25 8a.75.75 0 0 1 .75-.75h2.25v-2.25a.75.75 0 0 1 1.5 0v2.25h2.25a.75.75 0 0 1 0 1.5h-2.25v2.25a.75.75 0 0 1-1.5 0v-2.25h-2.25a.75.75 0 0 1-.75-.75" />
-                          <path
-                            fillRule="evenodd"
-                            d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14m0-1.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 1 0 0 11"
-                          />
-                        </svg>
-                      </span>
-                      <s-text>
-                        <s-text type="strong">Add</s-text> {reportTagInputValue.trim()}
-                      </s-text>
-                    </span>
-                  </s-clickable>
-                </div>
-                <s-divider />
-              </>
-            ) : null}
             <div className="report-tag-picker__list">
               {isSearchingReportTags ? (
                 <div className="report-tag-picker__loading">
