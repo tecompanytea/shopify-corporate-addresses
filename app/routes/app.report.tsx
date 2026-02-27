@@ -776,6 +776,9 @@ async function loadShopReportTags(
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
   if (query) {
+    let searchTags: string[] = [];
+    let baselineTags: string[] = [];
+
     try {
       const searchQuery = `title:${escapeSearchToken(query)}*`;
       const searched = await admin.graphql(SEARCH_REPORT_TAGS_QUERY, {
@@ -795,16 +798,38 @@ async function loadShopReportTags(
       };
 
       if (!searchedJson.errors || searchedJson.errors.length === 0) {
-        const tags = readReportTagConnectionValues(searchedJson.data?.shop?.orderTags);
-        if (tags.length === 0) {
-          return loadReportTagsFromOrders(admin, query);
-        }
-        return {
-          tags,
-        };
+        searchTags = readReportTagConnectionValues(searchedJson.data?.shop?.orderTags);
       }
     } catch {
-      // Fall through to orders-based fallback below.
+      // Continue to baseline/fallback logic below.
+    }
+
+    try {
+      const baselineResponse = await admin.graphql(REPORT_TAG_SUGGESTIONS_QUERY);
+      const baselineJson = (await baselineResponse.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          shop?: {
+            orderTags?: {
+              edges?: Array<{
+                node?: string | null;
+              }>;
+            } | null;
+          } | null;
+        };
+      };
+
+      if (!baselineJson.errors || baselineJson.errors.length === 0) {
+        baselineTags = readReportTagConnectionValues(baselineJson.data?.shop?.orderTags);
+      }
+    } catch {
+      // Continue to fallback logic below.
+    }
+
+    const merged = mergeUniqueTags(searchTags, baselineTags);
+    const ranked = rankTagListByPrefix(query, merged, 100);
+    if (ranked.length > 0) {
+      return { tags: ranked };
     }
 
     return loadReportTagsFromOrders(admin, query);
