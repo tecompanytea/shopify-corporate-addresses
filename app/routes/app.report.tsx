@@ -195,9 +195,6 @@ export default function ReportPage() {
 
   return (
     <s-page heading="Shipping Report">
-      <s-button slot="secondary-action" variant="tertiary" href="/app">
-        Back
-      </s-button>
       <s-button
         slot="primary-action"
         variant="primary"
