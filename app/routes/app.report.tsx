@@ -171,6 +171,38 @@ const SEARCH_DRAFT_REPORT_TAGS_QUERY = `#graphql
   }
 `;
 
+const REPORT_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY = `#graphql
+  query ReportTagSuggestionsByDraftOrders($after: String) {
+    draftOrders(first: 250, after: $after) {
+      edges {
+        node {
+          tags
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+const SEARCH_REPORT_TAGS_BY_DRAFT_ORDERS_QUERY = `#graphql
+  query SearchReportTagsByDraftOrders($query: String!, $after: String) {
+    draftOrders(first: 250, query: $query, after: $after) {
+      edges {
+        node {
+          tags
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
 const REPORT_TAG_SUGGESTIONS_BY_ORDERS_QUERY = `#graphql
   query ReportTagSuggestionsByOrders($after: String) {
     orders(first: 250, after: $after, sortKey: CREATED_AT, reverse: true) {
@@ -923,7 +955,35 @@ async function loadShopReportTags(
       return { tags: ranked };
     }
 
-    return loadReportTagsFromOrders(admin, query);
+    const reportTagsFromDraftOrders = await loadReportTagsFromDraftOrders(
+      admin,
+      query,
+    );
+    if (reportTagsFromDraftOrders.tags.length > 0) {
+      return reportTagsFromDraftOrders;
+    }
+
+    const reportTagsFromOrders = await loadReportTagsFromOrders(admin, query);
+    if (reportTagsFromOrders.tags.length > 0) {
+      return reportTagsFromOrders;
+    }
+
+    if (reportTagsFromDraftOrders.error && reportTagsFromOrders.error) {
+      return {
+        tags: [],
+        error: `${reportTagsFromDraftOrders.error}; ${reportTagsFromOrders.error}`,
+      };
+    }
+
+    if (reportTagsFromOrders.error) {
+      return { tags: [], error: reportTagsFromOrders.error };
+    }
+
+    if (reportTagsFromDraftOrders.error) {
+      return { tags: [], error: reportTagsFromDraftOrders.error };
+    }
+
+    return { tags: [] };
   }
 
   try {
@@ -979,7 +1039,114 @@ async function loadShopReportTags(
     // Fall through to orders-based fallback below.
   }
 
-  return loadReportTagsFromOrders(admin);
+  const reportTagsFromDraftOrders = await loadReportTagsFromDraftOrders(admin);
+  if (reportTagsFromDraftOrders.tags.length > 0) {
+    return reportTagsFromDraftOrders;
+  }
+
+  const reportTagsFromOrders = await loadReportTagsFromOrders(admin);
+  if (reportTagsFromOrders.tags.length > 0) {
+    return reportTagsFromOrders;
+  }
+
+  if (reportTagsFromDraftOrders.error && reportTagsFromOrders.error) {
+    return {
+      tags: [],
+      error: `${reportTagsFromDraftOrders.error}; ${reportTagsFromOrders.error}`,
+    };
+  }
+
+  if (reportTagsFromOrders.error) {
+    return { tags: [], error: reportTagsFromOrders.error };
+  }
+
+  if (reportTagsFromDraftOrders.error) {
+    return { tags: [], error: reportTagsFromDraftOrders.error };
+  }
+
+  return { tags: [] };
+}
+
+async function loadReportTagsFromDraftOrders(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  rawQuery?: string,
+): Promise<{ tags: string[]; error?: string }> {
+  const query = rawQuery?.trim() || "";
+  const searchQuery =
+    query.length > 0
+      ? query
+          .split(/\s+/)
+          .map((token) => token.trim())
+          .filter(Boolean)
+          .map((token) => `tag:${escapeSearchToken(token)}*`)
+          .join(" AND ")
+      : "";
+
+  const tagCounts = new Map<string, number>();
+  let after: string | null = null;
+  let hasNextPage = true;
+  let pagesLoaded = 0;
+
+  while (hasNextPage && pagesLoaded < REPORT_TAG_SCAN_MAX_PAGES) {
+    const response = await admin.graphql(
+      query
+        ? SEARCH_REPORT_TAGS_BY_DRAFT_ORDERS_QUERY
+        : REPORT_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY,
+      {
+        variables: query ? { query: searchQuery, after } : { after },
+      },
+    );
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        draftOrders?: {
+          edges?: Array<{
+            node?: {
+              tags?: string[] | null;
+            };
+          }>;
+          pageInfo?: {
+            hasNextPage?: boolean;
+            endCursor?: string | null;
+          };
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      return {
+        tags: [],
+        error: json.errors.map((error) => error.message).join("; "),
+      };
+    }
+
+    for (const edge of json.data?.draftOrders?.edges ?? []) {
+      for (const tag of edge.node?.tags ?? []) {
+        const normalized = tag.trim();
+        if (!normalized) continue;
+        tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
+      }
+    }
+
+    pagesLoaded += 1;
+    const pageInfo = json.data?.draftOrders?.pageInfo;
+    hasNextPage = Boolean(pageInfo?.hasNextPage);
+    after = pageInfo?.endCursor ?? null;
+    if (!after) {
+      hasNextPage = false;
+    }
+  }
+
+  const sorted = Array.from(tagCounts.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0], "en");
+    })
+    .map(([tag]) => tag);
+
+  return {
+    tags: query ? rankTagListByPrefix(query, sorted, 100) : sorted.slice(0, 500),
+  };
 }
 
 async function loadReportTagsFromOrders(
