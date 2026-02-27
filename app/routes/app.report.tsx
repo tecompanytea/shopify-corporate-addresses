@@ -113,7 +113,7 @@ const REPORT_TAG_PICKER_STYLES = `
   fill: currentColor;
 }
 `;
-const REPORT_TAG_SCAN_MAX_PAGES = 40;
+const REPORT_TAG_SCAN_MAX_PAGES = 10;
 
 const SHIPPING_REPORT_QUERY = `#graphql
   query ShippingReportOrders($query: String) {
