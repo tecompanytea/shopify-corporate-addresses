@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ActionFunctionArgs,
+  ClientLoaderFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
@@ -451,6 +452,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     results: processedResults,
   } satisfies CreateActionData;
 };
+
+export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
+  return await serverLoader();
+}
+
+export function HydrateFallback() {
+  return null;
+}
 
 export default function Index() {
   const { customers, customerLoadWarning } = useLoaderData<typeof loader>();
@@ -959,14 +968,11 @@ export default function Index() {
             </s-section>
 
             {parseResult ? (
-              <s-section heading="Parsed CSV Data" padding="none">
+              <s-section heading="Parsed CSV Data">
                 <s-box padding="base">
                   <s-text color="subdued">
                     {parseResult.rowCount} rows ready to import
                   </s-text>
-                </s-box>
-
-                <s-box padding="base">
                   <s-table>
                     <s-table-header-row>
                       <s-table-header listSlot="kicker">Row</s-table-header>
