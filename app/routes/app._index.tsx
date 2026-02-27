@@ -1454,11 +1454,11 @@ export default function Index() {
   );
 
   if (!isHydrated) {
-    return <div>Loading CSV importer...</div>;
+    return <div>Loading Corporate Addresses...</div>;
   }
 
   return (
-    <s-page heading="CSV Order Importer">
+    <s-page heading="Corporate Addresses">
       {parseResult ? (
         <s-button
           slot="primary-action"

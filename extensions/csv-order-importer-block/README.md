@@ -1,4 +1,4 @@
-# CSV Order Importer
+# Corporate Addresses
 
 Admin action extension for importing CSV rows and creating Shopify orders.
 
