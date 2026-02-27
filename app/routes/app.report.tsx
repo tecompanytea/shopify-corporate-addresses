@@ -324,7 +324,7 @@ export default function ReportPage() {
         ) : null}
 
         <s-stack direction="inline" gap="base" justifyContent="end">
-          <s-button variant="secondary" tone="critical" href="/app">
+          <s-button variant="primary" tone="critical" href="/app">
             Cancel
           </s-button>
           <s-button
