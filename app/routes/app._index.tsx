@@ -353,12 +353,21 @@ const SEARCH_CUSTOMERS_QUERY = `#graphql
 `;
 
 const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
-  query OrderTagSuggestions {
-    orders(first: 100, sortKey: CREATED_AT, reverse: true) {
+  query OrderTagSuggestions($after: String) {
+    orders(
+      first: 250
+      after: $after
+      sortKey: CREATED_AT
+      reverse: true
+    ) {
       edges {
         node {
           tags
         }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -431,26 +440,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   try {
-    const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY);
-    const json = (await response.json()) as {
-      errors?: Array<{ message: string }>;
-      data?: {
-        orders?: {
-          edges?: Array<{
-            node?: {
-              tags?: string[] | null;
+    const tagCounts = new Map<string, number>();
+    let after: string | null = null;
+    let hasNextPage = true;
+    let pagesLoaded = 0;
+    const maxPages = 8;
+
+    while (hasNextPage && pagesLoaded < maxPages) {
+      const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY, {
+        variables: {
+          after,
+        },
+      });
+      const json = (await response.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          orders?: {
+            edges?: Array<{
+              node?: {
+                tags?: string[] | null;
+              };
+            }>;
+            pageInfo?: {
+              hasNextPage?: boolean;
+              endCursor?: string | null;
             };
-          }>;
+          };
         };
       };
-    };
 
-    if (json.errors && json.errors.length > 0) {
-      orderTagLoadWarning = `Unable to load order tag suggestions: ${json.errors
-        .map((error) => error.message)
-        .join("; ")}`;
-    } else {
-      const tagCounts = new Map<string, number>();
+      if (json.errors && json.errors.length > 0) {
+        orderTagLoadWarning = `Unable to load order tag suggestions: ${json.errors
+          .map((error) => error.message)
+          .join("; ")}`;
+        break;
+      }
 
       for (const edge of json.data?.orders?.edges ?? []) {
         for (const tag of edge.node?.tags ?? []) {
@@ -460,16 +484,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       }
 
-      const sortedTags = Array.from(tagCounts.entries())
-        .sort((a, b) => {
-          if (b[1] !== a[1]) return b[1] - a[1];
-          return a[0].localeCompare(b[0], "en");
-        })
-        .map(([tag]) => tag)
-        .slice(0, 100);
-
-      orderTagSuggestions.push(...sortedTags);
+      pagesLoaded += 1;
+      const pageInfo = json.data?.orders?.pageInfo;
+      hasNextPage = Boolean(pageInfo?.hasNextPage);
+      after = pageInfo?.endCursor ?? null;
+      if (!after) {
+        hasNextPage = false;
+      }
     }
+
+    const sortedTags = Array.from(tagCounts.entries())
+      .sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0], "en");
+      })
+      .map(([tag]) => tag)
+      .slice(0, 500);
+
+    orderTagSuggestions.push(...sortedTags);
   } catch {
     orderTagLoadWarning =
       "Unable to load order tag suggestions right now. You can still add tags manually.";
@@ -872,9 +904,18 @@ export default function Index() {
       return [];
     }
 
-    return orderTagSuggestions
-      .filter((tag) => tag.toLowerCase().includes(query))
-      .slice(0, 50);
+    const matching: string[] = [];
+    const others: string[] = [];
+
+    for (const tag of orderTagSuggestions) {
+      if (tag.toLowerCase().includes(query)) {
+        matching.push(tag);
+      } else {
+        others.push(tag);
+      }
+    }
+
+    return [...matching, ...others].slice(0, 100);
   }, [orderTagInputValue, orderTagSuggestions]);
 
   const canAddTypedOrderTag = useMemo(() => {
