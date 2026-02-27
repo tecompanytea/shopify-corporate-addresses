@@ -879,6 +879,20 @@ export default function Index() {
   const summary = importResult?.summary;
   const results = importResult?.results ?? [];
 
+  if (!isHydrated) {
+    return (
+      <div
+        style={{
+          padding: "16px",
+          fontSize: "14px",
+          color: "var(--p-color-text-subdued, #6b7280)",
+        }}
+      >
+        Loading CSV importer...
+      </div>
+    );
+  }
+
   return (
     <s-page heading="CSV Order Importer">
       <style>{CUSTOMER_PICKER_STYLES}</style>
