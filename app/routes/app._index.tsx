@@ -2339,8 +2339,12 @@ async function loadShopOrderTags(
       };
 
       if (!searchedJson.errors || searchedJson.errors.length === 0) {
+        const tags = readTagConnectionValues(searchedJson.data?.shop?.orderTags);
+        if (tags.length === 0) {
+          return loadOrderTagsFromOrders(admin, query);
+        }
         return {
-          tags: readTagConnectionValues(searchedJson.data?.shop?.orderTags),
+          tags,
         };
       }
     } catch {

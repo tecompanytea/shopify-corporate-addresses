@@ -795,8 +795,12 @@ async function loadShopReportTags(
       };
 
       if (!searchedJson.errors || searchedJson.errors.length === 0) {
+        const tags = readReportTagConnectionValues(searchedJson.data?.shop?.orderTags);
+        if (tags.length === 0) {
+          return loadReportTagsFromOrders(admin, query);
+        }
         return {
-          tags: readReportTagConnectionValues(searchedJson.data?.shop?.orderTags),
+          tags,
         };
       }
     } catch {
