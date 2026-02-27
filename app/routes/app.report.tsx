@@ -260,15 +260,11 @@ export default function ReportPage() {
                     </s-option>
                   ))}
                 </s-select>
-                <s-text color="subdued">
-                  Selecting a tag adds it to the report tag filter.
-                </s-text>
               </>
             ) : null}
 
             {selectedTags.length > 0 ? (
               <s-stack direction="block" gap="small">
-                <s-text color="subdued">Selected tags</s-text>
                 <s-stack direction="inline" gap="small">
                   {selectedTags.map((tag) => (
                     <s-clickable-chip
