@@ -126,6 +126,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: "Invalid report request." } satisfies ReportActionData;
   }
 
+  const orderNumbers =
+    (formData.get("orderNumbers") as string | null)?.trim() || "";
+  const searchTags = (formData.get("searchTags") as string | null)?.trim() || "";
+
+  if (
+    splitCommaValues(orderNumbers).length === 0 &&
+    splitCommaValues(searchTags).length === 0
+  ) {
+    return {
+      error: "Enter at least one order number or choose at least one tag.",
+    } satisfies ReportActionData;
+  }
+
   return generateShippingReport(admin, formData);
 };
 
@@ -144,6 +157,9 @@ export default function ReportPage() {
   const [reportTableQuery, setReportTableQuery] = useState("");
 
   const isGeneratingReport = reportFetcher.state === "submitting";
+  const hasReportCriteria =
+    splitCommaValues(orderNumbersInput).length > 0 ||
+    splitCommaValues(searchTagsInput).length > 0;
 
   useEffect(() => {
     if (!reportFetcher.data) return;
@@ -291,6 +307,7 @@ export default function ReportPage() {
                 variant="primary"
                 onClick={onGenerateReport}
                 {...(isGeneratingReport ? { loading: true } : {})}
+                disabled={!hasReportCriteria}
               >
                 Generate Report
               </s-button>
