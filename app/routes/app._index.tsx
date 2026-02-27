@@ -180,6 +180,7 @@ const DEFAULT_LINE_ITEM_TITLE = "Corporate Gift";
 const DEFAULT_LINE_ITEM_PRICE = "0.00";
 const DEFAULT_LINE_ITEM_CURRENCY = "USD";
 const DEFAULT_LINE_ITEM_QUANTITY = 1;
+const ORDER_TAG_SCAN_MAX_PAGES = 10;
 
 const CUSTOMER_PICKER_STYLES = `
 .Polaris-Layout {
@@ -383,6 +384,49 @@ const SEARCH_ORDER_TAGS_QUERY = `#graphql
         edges {
           node
         }
+      }
+    }
+  }
+`;
+
+const ORDER_TAG_SUGGESTIONS_BY_ORDERS_QUERY = `#graphql
+  query OrderTagSuggestionsByOrders($after: String) {
+    orders(
+      first: 250
+      after: $after
+      sortKey: CREATED_AT
+      reverse: true
+    ) {
+      edges {
+        node {
+          tags
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+const SEARCH_ORDER_TAGS_BY_ORDERS_QUERY = `#graphql
+  query SearchOrderTagsByOrders($query: String!, $after: String) {
+    orders(
+      first: 250
+      query: $query
+      after: $after
+      sortKey: CREATED_AT
+      reverse: true
+    ) {
+      edges {
+        node {
+          tags
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -2276,11 +2320,39 @@ async function loadShopOrderTags(
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
   if (query) {
-    const searchQuery = `title:${escapeSearchToken(query)}*`;
-    const searched = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
-      variables: { query: searchQuery },
-    });
-    const searchedJson = (await searched.json()) as {
+    try {
+      const searchQuery = `title:${escapeSearchToken(query)}*`;
+      const searched = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
+        variables: { query: searchQuery },
+      });
+      const searchedJson = (await searched.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          shop?: {
+            orderTags?: {
+              edges?: Array<{
+                node?: string | null;
+              }>;
+            } | null;
+          } | null;
+        };
+      };
+
+      if (!searchedJson.errors || searchedJson.errors.length === 0) {
+        return {
+          tags: readTagConnectionValues(searchedJson.data?.shop?.orderTags),
+        };
+      }
+    } catch {
+      // Fall through to orders-based fallback below.
+    }
+
+    return loadOrderTagsFromOrders(admin, query);
+  }
+
+  try {
+    const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY);
+    const json = (await response.json()) as {
       errors?: Array<{ message: string }>;
       data?: {
         shop?: {
@@ -2293,44 +2365,95 @@ async function loadShopOrderTags(
       };
     };
 
-    if (!searchedJson.errors || searchedJson.errors.length === 0) {
+    if (!json.errors || json.errors.length === 0) {
       return {
-        tags: readTagConnectionValues(searchedJson.data?.shop?.orderTags),
+        tags: readTagConnectionValues(json.data?.shop?.orderTags),
+      };
+    }
+  } catch {
+    // Fall through to orders-based fallback below.
+  }
+
+  return loadOrderTagsFromOrders(admin);
+}
+
+async function loadOrderTagsFromOrders(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  rawQuery?: string,
+): Promise<{ tags: string[]; error?: string }> {
+  const query = rawQuery?.trim() || "";
+  const searchQuery =
+    query.length > 0
+      ? query
+          .split(/\s+/)
+          .map((token) => token.trim())
+          .filter(Boolean)
+          .map((token) => `tag:${escapeSearchToken(token)}*`)
+          .join(" AND ")
+      : "";
+
+  const tagCounts = new Map<string, number>();
+  let after: string | null = null;
+  let hasNextPage = true;
+  let pagesLoaded = 0;
+
+  while (hasNextPage && pagesLoaded < ORDER_TAG_SCAN_MAX_PAGES) {
+    const response = await admin.graphql(
+      query ? SEARCH_ORDER_TAGS_BY_ORDERS_QUERY : ORDER_TAG_SUGGESTIONS_BY_ORDERS_QUERY,
+      {
+        variables: query ? { query: searchQuery, after } : { after },
+      },
+    );
+    const json = (await response.json()) as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        orders?: {
+          edges?: Array<{
+            node?: {
+              tags?: string[] | null;
+            };
+          }>;
+          pageInfo?: {
+            hasNextPage?: boolean;
+            endCursor?: string | null;
+          };
+        };
+      };
+    };
+
+    if (json.errors && json.errors.length > 0) {
+      return {
+        tags: [],
+        error: json.errors.map((error) => error.message).join("; "),
       };
     }
 
-    const errorMessage = searchedJson.errors
-      .map((error) => error.message)
-      .join("; ");
+    for (const edge of json.data?.orders?.edges ?? []) {
+      for (const tag of edge.node?.tags ?? []) {
+        const normalized = tag.trim();
+        if (!normalized) continue;
+        tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
+      }
+    }
 
-    if (!isUnsupportedTagQueryError(errorMessage)) {
-      return { tags: [], error: errorMessage };
+    pagesLoaded += 1;
+    const pageInfo = json.data?.orders?.pageInfo;
+    hasNextPage = Boolean(pageInfo?.hasNextPage);
+    after = pageInfo?.endCursor ?? null;
+    if (!after) {
+      hasNextPage = false;
     }
   }
 
-  const response = await admin.graphql(ORDER_TAG_SUGGESTIONS_QUERY);
-  const json = (await response.json()) as {
-    errors?: Array<{ message: string }>;
-    data?: {
-      shop?: {
-        orderTags?: {
-          edges?: Array<{
-            node?: string | null;
-          }>;
-        } | null;
-      } | null;
-    };
-  };
-
-  if (json.errors && json.errors.length > 0) {
-    return {
-      tags: [],
-      error: json.errors.map((error) => error.message).join("; "),
-    };
-  }
+  const sorted = Array.from(tagCounts.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0], "en");
+    })
+    .map(([tag]) => tag);
 
   return {
-    tags: readTagConnectionValues(json.data?.shop?.orderTags),
+    tags: query ? rankOrderTagList(query, sorted, 100) : sorted.slice(0, 500),
   };
 }
 
@@ -2357,14 +2480,6 @@ function readTagConnectionValues(
   }
 
   return values;
-}
-
-function isUnsupportedTagQueryError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("unknown argument") ||
-    normalized.includes("doesn't accept argument")
-  );
 }
 
 async function createCustomer(
