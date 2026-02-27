@@ -195,8 +195,16 @@ export default function ReportPage() {
 
   return (
     <s-page heading="Shipping Report">
-      <s-button slot="secondary-action" variant="secondary" href="/app">
-        Back to Importer
+      <s-button slot="secondary-action" variant="tertiary" href="/app">
+        Back
+      </s-button>
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        onClick={onExportReport}
+        disabled={reportOrders.length === 0}
+      >
+        Export
       </s-button>
 
       {reportTagLoadWarning ? (
@@ -317,6 +325,19 @@ export default function ReportPage() {
             </s-table>
           </s-section>
         ) : null}
+
+        <s-stack direction="inline" gap="base" justifyContent="end">
+          <s-button variant="secondary" tone="critical" href="/app">
+            Cancel
+          </s-button>
+          <s-button
+            variant="primary"
+            onClick={onExportReport}
+            disabled={reportOrders.length === 0}
+          >
+            Export
+          </s-button>
+        </s-stack>
       </s-stack>
     </s-page>
   );
