@@ -1055,9 +1055,14 @@ export default function Index() {
     const query = value.trim();
     setCustomerInputValue(value);
     setIsCustomerSearchQueued(query.length >= 2);
-    setIsCustomerDropdownOpen(true);
-    setActiveCustomerMenuIndex(0);
-    updateCustomerMenuPosition();
+    if (query.length === 0) {
+      setIsCustomerDropdownOpen(false);
+      setCustomerMenuRect(null);
+    } else {
+      setIsCustomerDropdownOpen(true);
+      setActiveCustomerMenuIndex(0);
+      updateCustomerMenuPosition();
+    }
     setCustomerError("");
     setCustomerMessage("");
 
