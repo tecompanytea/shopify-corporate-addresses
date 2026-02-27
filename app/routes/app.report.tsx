@@ -234,18 +234,6 @@ export default function ReportPage() {
               }}
             />
 
-            <s-text-field
-              label="Tags (optional)"
-              placeholder="e.g., imported, batch:sonya"
-              value={searchTagsInput}
-              onInput={(event: Event) => {
-                const target = event.currentTarget as HTMLElement & {
-                  value?: string;
-                };
-                setSearchTagsInput(target.value || "");
-              }}
-            />
-
             {reportTagSuggestions.length > 0 ? (
               <>
                 <s-select
@@ -264,6 +252,21 @@ export default function ReportPage() {
                   Selecting a tag adds it to the report tag filter.
                 </s-text>
               </>
+            ) : null}
+
+            {searchTagsInput ? (
+              <s-stack direction="inline" gap="base" justifyContent="space-between">
+                <s-text color="subdued">Selected tags: {searchTagsInput}</s-text>
+                <s-button
+                  variant="secondary"
+                  onClick={() => {
+                    setSearchTagsInput("");
+                    setSelectedReportTagSuggestion("");
+                  }}
+                >
+                  Clear tags
+                </s-button>
+              </s-stack>
             ) : null}
 
             <s-stack direction="inline" gap="base">
