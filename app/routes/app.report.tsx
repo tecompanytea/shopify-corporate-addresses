@@ -271,20 +271,20 @@ export default function ReportPage() {
                 <s-text color="subdued">Selected tags</s-text>
                 <s-stack direction="inline" gap="small">
                   {selectedTags.map((tag) => (
-                    <s-stack key={tag} direction="inline" gap="none">
-                      <s-badge>{tag}</s-badge>
-                      <s-button
-                        variant="tertiary"
-                        onClick={() => {
-                          setSearchTagsInput((existing) =>
-                            removeCommaValue(existing, tag),
-                          );
-                          setSelectedReportTagSuggestion("");
-                        }}
-                      >
-                        x
-                      </s-button>
-                    </s-stack>
+                    <s-clickable-chip
+                      key={tag}
+                      color="strong"
+                      accessibilityLabel={`Remove tag ${tag}`}
+                      removable
+                      onRemove={() => {
+                        setSearchTagsInput((existing) =>
+                          removeCommaValue(existing, tag),
+                        );
+                        setSelectedReportTagSuggestion("");
+                      }}
+                    >
+                      {tag}
+                    </s-clickable-chip>
                   ))}
                 </s-stack>
               </s-stack>
