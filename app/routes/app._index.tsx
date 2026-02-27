@@ -880,17 +880,7 @@ export default function Index() {
   const results = importResult?.results ?? [];
 
   if (!isHydrated) {
-    return (
-      <div
-        style={{
-          padding: "16px",
-          fontSize: "14px",
-          color: "var(--p-color-text-subdued, #6b7280)",
-        }}
-      >
-        Loading CSV importer...
-      </div>
-    );
+    return <div>Loading CSV importer...</div>;
   }
 
   return (
