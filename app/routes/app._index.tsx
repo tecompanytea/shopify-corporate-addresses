@@ -419,7 +419,7 @@ const SEARCH_DRAFT_ORDER_TAGS_QUERY = `#graphql
 
 const ORDER_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY = `#graphql
   query OrderTagSuggestionsByDraftOrders($after: String) {
-    draftOrders(first: 250, after: $after) {
+    draftOrders(first: 250, after: $after, sortKey: UPDATED_AT, reverse: true) {
       edges {
         node {
           tags
@@ -435,7 +435,13 @@ const ORDER_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY = `#graphql
 
 const SEARCH_ORDER_TAGS_BY_DRAFT_ORDERS_QUERY = `#graphql
   query SearchOrderTagsByDraftOrders($query: String!, $after: String) {
-    draftOrders(first: 250, query: $query, after: $after) {
+    draftOrders(
+      first: 250
+      query: $query
+      after: $after
+      sortKey: UPDATED_AT
+      reverse: true
+    ) {
       edges {
         node {
           tags
@@ -2488,28 +2494,31 @@ async function loadShopOrderTags(
       // Continue to fallback logic below.
     }
 
+    const draftOrderTagsFromDraftOrders = await loadOrderTagsFromDraftOrders(
+      admin,
+      query,
+    );
     const merged = mergeUniqueTags(
       draftSearchTags,
       draftBaselineTags,
       searchTags,
       baselineTags,
+      draftOrderTagsFromDraftOrders.tags,
     );
     const ranked = rankOrderTagList(query, merged, 100);
     if (ranked.length > 0) {
       return { tags: ranked };
     }
 
-    const draftOrderTagsFromDraftOrders = await loadOrderTagsFromDraftOrders(
-      admin,
-      query,
-    );
-    if (draftOrderTagsFromDraftOrders.tags.length > 0) {
-      return draftOrderTagsFromDraftOrders;
-    }
-
     const orderTagsFromOrders = await loadOrderTagsFromOrders(admin, query);
     if (orderTagsFromOrders.tags.length > 0) {
-      return orderTagsFromOrders;
+      return {
+        tags: rankOrderTagList(
+          query,
+          mergeUniqueTags(merged, orderTagsFromOrders.tags),
+          100,
+        ),
+      };
     }
 
     if (draftOrderTagsFromDraftOrders.error && orderTagsFromOrders.error) {

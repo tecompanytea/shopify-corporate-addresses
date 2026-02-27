@@ -173,7 +173,7 @@ const SEARCH_DRAFT_REPORT_TAGS_QUERY = `#graphql
 
 const REPORT_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY = `#graphql
   query ReportTagSuggestionsByDraftOrders($after: String) {
-    draftOrders(first: 250, after: $after) {
+    draftOrders(first: 250, after: $after, sortKey: UPDATED_AT, reverse: true) {
       edges {
         node {
           tags
@@ -189,7 +189,13 @@ const REPORT_TAG_SUGGESTIONS_BY_DRAFT_ORDERS_QUERY = `#graphql
 
 const SEARCH_REPORT_TAGS_BY_DRAFT_ORDERS_QUERY = `#graphql
   query SearchReportTagsByDraftOrders($query: String!, $after: String) {
-    draftOrders(first: 250, query: $query, after: $after) {
+    draftOrders(
+      first: 250
+      query: $query
+      after: $after
+      sortKey: UPDATED_AT
+      reverse: true
+    ) {
       edges {
         node {
           tags
@@ -944,28 +950,31 @@ async function loadShopReportTags(
       // Continue to fallback logic below.
     }
 
+    const reportTagsFromDraftOrders = await loadReportTagsFromDraftOrders(
+      admin,
+      query,
+    );
     const merged = mergeUniqueTags(
       draftSearchTags,
       draftBaselineTags,
       searchTags,
       baselineTags,
+      reportTagsFromDraftOrders.tags,
     );
     const ranked = rankTagListByPrefix(query, merged, 100);
     if (ranked.length > 0) {
       return { tags: ranked };
     }
 
-    const reportTagsFromDraftOrders = await loadReportTagsFromDraftOrders(
-      admin,
-      query,
-    );
-    if (reportTagsFromDraftOrders.tags.length > 0) {
-      return reportTagsFromDraftOrders;
-    }
-
     const reportTagsFromOrders = await loadReportTagsFromOrders(admin, query);
     if (reportTagsFromOrders.tags.length > 0) {
-      return reportTagsFromOrders;
+      return {
+        tags: rankTagListByPrefix(
+          query,
+          mergeUniqueTags(merged, reportTagsFromOrders.tags),
+          100,
+        ),
+      };
     }
 
     if (reportTagsFromDraftOrders.error && reportTagsFromOrders.error) {
