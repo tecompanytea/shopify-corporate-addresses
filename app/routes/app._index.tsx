@@ -1533,13 +1533,7 @@ export default function Index() {
             </s-section>
 
             {parseResult ? (
-              <s-section heading="Parsed CSV Data" padding="none">
-                <s-box padding="base">
-                  <s-text color="subdued">
-                    {filteredPreviewRows.length} of {parseResult.rowCount} rows
-                    shown
-                  </s-text>
-                </s-box>
+              <s-section padding="none">
                 <s-table>
                   <s-search-field
                     slot="filters"
