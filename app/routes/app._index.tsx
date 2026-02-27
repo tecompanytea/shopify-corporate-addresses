@@ -1590,14 +1590,10 @@ async function generateShippingReport(
   formData: FormData,
 ): Promise<ReportActionData> {
   const orderNumbers = (formData.get("orderNumbers") as string | null)?.trim() || "";
-  const startDate = (formData.get("startDate") as string | null)?.trim() || "";
-  const endDate = (formData.get("endDate") as string | null)?.trim() || "";
   const searchTags = (formData.get("searchTags") as string | null)?.trim() || "";
 
   const query = buildOrderSearchQuery({
     orderNumbers,
-    startDate,
-    endDate,
     searchTags,
   });
 
@@ -1881,8 +1877,6 @@ async function createCustomer(
 
 function buildOrderSearchQuery(filters: {
   orderNumbers: string;
-  startDate: string;
-  endDate: string;
   searchTags: string;
 }): string {
   const queryParts: string[] = [];
@@ -1896,13 +1890,6 @@ function buildOrderSearchQuery(filters: {
         .map((number) => `name:'${escapeSearchValue(number)}'`)
         .join(" OR ")})`,
     );
-  } else {
-    if (filters.startDate) {
-      queryParts.push(`created_at:>=${escapeSearchValue(filters.startDate)}`);
-    }
-    if (filters.endDate) {
-      queryParts.push(`created_at:<=${escapeSearchValue(filters.endDate)}`);
-    }
   }
 
   if (tags.length > 0) {
