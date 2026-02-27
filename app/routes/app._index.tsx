@@ -468,6 +468,7 @@ export default function Index() {
     "success" | "warning"
   >("success");
   const [customerError, setCustomerError] = useState("");
+  const [isCustomerSearchQueued, setIsCustomerSearchQueued] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [orderTagsInput, setOrderTagsInput] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
@@ -488,8 +489,10 @@ export default function Index() {
 
   const isCreating = createFetcher.state === "submitting";
   const isCreatingCustomer = customerCreateFetcher.state === "submitting";
+  const shouldSearchCustomers = customerInputValue.trim().length >= 2;
   const isSearchingCustomers =
-    customerInputValue.trim().length >= 2 && customerSearchFetcher.state !== "idle";
+    shouldSearchCustomers &&
+    (isCustomerSearchQueued || customerSearchFetcher.state !== "idle");
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
@@ -525,6 +528,7 @@ export default function Index() {
   useEffect(() => {
     const searchData = customerSearchFetcher.data;
     if (!searchData) return;
+    setIsCustomerSearchQueued(false);
 
     if (searchData.type === "error") {
       setCustomerError(searchData.error);
@@ -577,7 +581,11 @@ export default function Index() {
 
   useEffect(() => {
     const query = customerInputValue.trim();
-    if (query.length < 2) return;
+    if (query.length < 2) {
+      setIsCustomerSearchQueued(false);
+      return;
+    }
+    setIsCustomerSearchQueued(true);
 
     const timeout = window.setTimeout(() => {
       const formData = new FormData();
@@ -749,7 +757,9 @@ export default function Index() {
   const onCustomerFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
+    const query = value.trim();
     setCustomerInputValue(value);
+    setIsCustomerSearchQueued(query.length >= 2);
     setIsCustomerDropdownOpen(true);
     setActiveCustomerMenuIndex(0);
     updateCustomerMenuPosition();
@@ -1213,7 +1223,7 @@ export default function Index() {
                   </s-stack>
                 </div>
               ) : null}
-              {filteredCustomers.length === 0 ? (
+              {!isSearchingCustomers && filteredCustomers.length === 0 ? (
                 <s-box padding="small">
                   <s-text color="subdued">No matching customers.</s-text>
                 </s-box>
