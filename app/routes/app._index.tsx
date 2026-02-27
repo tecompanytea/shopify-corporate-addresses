@@ -207,6 +207,10 @@ const CUSTOMER_PICKER_STYLES = `
   overflow-y: auto;
 }
 
+.customer-picker__loading {
+  padding: 8px 12px;
+}
+
 .customer-picker__menu [data-customer-row="true"][data-active="true"] {
   background: var(--p-color-bg-fill-tertiary, #f3f4f6);
 }
@@ -484,6 +488,8 @@ export default function Index() {
 
   const isCreating = createFetcher.state === "submitting";
   const isCreatingCustomer = customerCreateFetcher.state === "submitting";
+  const isSearchingCustomers =
+    customerInputValue.trim().length >= 2 && customerSearchFetcher.state !== "idle";
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
@@ -1196,6 +1202,17 @@ export default function Index() {
             </div>
             <s-divider />
             <div className="customer-picker__list">
+              {isSearchingCustomers ? (
+                <div className="customer-picker__loading">
+                  <s-stack direction="inline" gap="small">
+                    <s-spinner
+                      accessibilityLabel="Searching customers"
+                      size="base"
+                    />
+                    <s-text color="subdued">Searching customers...</s-text>
+                  </s-stack>
+                </div>
+              ) : null}
               {filteredCustomers.length === 0 ? (
                 <s-box padding="small">
                   <s-text color="subdued">No matching customers.</s-text>
