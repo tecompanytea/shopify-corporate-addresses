@@ -123,6 +123,18 @@ type CustomerActionData =
       error: string;
     };
 
+type OrderTagSearchActionData =
+  | {
+      type: "search_order_tags";
+      query: string;
+      tags: string[];
+    }
+  | {
+      type: "error";
+      query: string;
+      error: string;
+    };
+
 type ActionPayload = {
   rowCount: number;
   orders: OrderDraft[];
@@ -373,6 +385,28 @@ const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
   }
 `;
 
+const SEARCH_ORDER_TAGS_QUERY = `#graphql
+  query SearchOrderTags($query: String!, $after: String) {
+    orders(
+      first: 250
+      query: $query
+      after: $after
+      sortKey: CREATED_AT
+      reverse: true
+    ) {
+      edges {
+        node {
+          tags
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
 const CUSTOMER_CREATE_MUTATION = `#graphql
   mutation CustomerCreateForImporter($input: CustomerInput!) {
     customerCreate(input: $input) {
@@ -528,6 +562,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return createCustomer(admin, formData);
   }
 
+  if (intent === "search_order_tags") {
+    return searchOrderTags(admin, formData);
+  }
+
   const payloadText = formData.get("payload");
 
   if (typeof payloadText !== "string") {
@@ -618,6 +656,7 @@ export default function Index() {
   const createFetcher = useFetcher<CreateActionData>();
   const customerSearchFetcher = useFetcher<CustomerActionData>();
   const customerCreateFetcher = useFetcher<CustomerActionData>();
+  const orderTagSearchFetcher = useFetcher<OrderTagSearchActionData>();
 
   const [fileName, setFileName] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -642,6 +681,11 @@ export default function Index() {
   const [selectedOrderTags, setSelectedOrderTags] = useState<string[]>([]);
   const [orderTagInputValue, setOrderTagInputValue] = useState("");
   const [isOrderTagDropdownOpen, setIsOrderTagDropdownOpen] = useState(false);
+  const [isOrderTagSearchQueued, setIsOrderTagSearchQueued] = useState(false);
+  const [orderTagSearchQuery, setOrderTagSearchQuery] = useState("");
+  const [orderTagSearchResults, setOrderTagSearchResults] = useState<string[]>(
+    [],
+  );
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseNotice, setParseNotice] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -671,6 +715,13 @@ export default function Index() {
   const isSearchingCustomers =
     shouldSearchCustomers &&
     (isCustomerSearchQueued || customerSearchFetcher.state !== "idle");
+  const trimmedOrderTagQuery = orderTagInputValue.trim();
+  const shouldSearchOrderTags = trimmedOrderTagQuery.length >= 2;
+  const isSearchingOrderTags =
+    shouldSearchOrderTags &&
+    (isOrderTagSearchQueued ||
+      orderTagSearchFetcher.state !== "idle" ||
+      orderTagSearchQuery !== trimmedOrderTagQuery);
   const canCreate =
     !isCreating && Boolean(parseResult) && (parseResult?.orders.length ?? 0) > 0;
 
@@ -776,6 +827,45 @@ export default function Index() {
       window.clearTimeout(timeout);
     };
   }, [customerInputValue]);
+
+  useEffect(() => {
+    const query = orderTagInputValue.trim();
+
+    if (query.length < 2) {
+      setIsOrderTagSearchQueued(false);
+      setOrderTagSearchQuery("");
+      setOrderTagSearchResults([]);
+      return;
+    }
+
+    setIsOrderTagSearchQueued(true);
+
+    const timeout = window.setTimeout(() => {
+      const formData = new FormData();
+      formData.append("intent", "search_order_tags");
+      formData.append("query", query);
+      orderTagSearchFetcher.submit(formData, { method: "POST" });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [orderTagInputValue]);
+
+  useEffect(() => {
+    const searchData = orderTagSearchFetcher.data;
+    if (!searchData) return;
+
+    setIsOrderTagSearchQueued(false);
+    setOrderTagSearchQuery(searchData.query);
+
+    if (searchData.type === "error") {
+      setOrderTagSearchResults([]);
+      return;
+    }
+
+    setOrderTagSearchResults(searchData.tags);
+  }, [orderTagSearchFetcher.data]);
 
   useEffect(() => {
     if (!isCustomerDropdownOpen) return;
@@ -904,19 +994,47 @@ export default function Index() {
       return [];
     }
 
-    const matching: string[] = [];
+    const baseSuggestions =
+      query.length >= 2
+        ? orderTagSearchQuery === orderTagInputValue.trim()
+          ? orderTagSearchResults
+          : []
+        : orderTagSuggestions;
+
+    const unique = new Set<string>();
+    const deduped: string[] = [];
+
+    for (const tag of baseSuggestions) {
+      const normalized = tag.trim();
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (unique.has(key)) continue;
+      unique.add(key);
+      deduped.push(normalized);
+    }
+
+    const startsWith: string[] = [];
+    const includes: string[] = [];
     const others: string[] = [];
 
-    for (const tag of orderTagSuggestions) {
-      if (tag.toLowerCase().includes(query)) {
-        matching.push(tag);
+    for (const tag of deduped) {
+      const normalized = tag.toLowerCase();
+      if (normalized.startsWith(query)) {
+        startsWith.push(tag);
+      } else if (normalized.includes(query)) {
+        includes.push(tag);
       } else {
         others.push(tag);
       }
     }
 
-    return [...matching, ...others].slice(0, 100);
-  }, [orderTagInputValue, orderTagSuggestions]);
+    return [...startsWith, ...includes, ...others].slice(0, 100);
+  }, [
+    orderTagInputValue,
+    orderTagSearchQuery,
+    orderTagSearchResults,
+    orderTagSuggestions,
+  ]);
 
   const canAddTypedOrderTag = useMemo(() => {
     const value = orderTagInputValue.trim();
@@ -928,11 +1046,16 @@ export default function Index() {
     );
     if (alreadySelected) return false;
 
-    const alreadyExists = orderTagSuggestions.some(
-      (tag) => tag.toLowerCase() === normalized,
-    );
+    const alreadyExists =
+      orderTagSuggestions.some((tag) => tag.toLowerCase() === normalized) ||
+      orderTagSearchResults.some((tag) => tag.toLowerCase() === normalized);
     return !alreadyExists;
-  }, [orderTagInputValue, orderTagSuggestions, selectedOrderTags]);
+  }, [
+    orderTagInputValue,
+    orderTagSearchResults,
+    orderTagSuggestions,
+    selectedOrderTags,
+  ]);
 
   const updateCustomerMenuPosition = () => {
     const anchor = customerPickerRef.current;
@@ -1700,7 +1823,18 @@ export default function Index() {
               </>
             ) : null}
             <div className="order-tag-picker__list">
-              {filteredOrderTagSuggestions.length === 0 ? (
+              {isSearchingOrderTags ? (
+                <div className="customer-picker__loading">
+                  <s-stack direction="inline" gap="small">
+                    <s-spinner
+                      accessibilityLabel="Searching order tags"
+                      size="base"
+                    />
+                    <s-text color="subdued">Searching tags...</s-text>
+                  </s-stack>
+                </div>
+              ) : null}
+              {!isSearchingOrderTags && filteredOrderTagSuggestions.length === 0 ? (
                 <s-box padding="small">
                   <s-text color="subdued">No matching tags.</s-text>
                 </s-box>
@@ -2196,6 +2330,97 @@ async function searchCustomers(
   }
 }
 
+async function searchOrderTags(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  formData: FormData,
+): Promise<OrderTagSearchActionData> {
+  const queryRaw = (formData.get("query") as string | null)?.trim() || "";
+  if (queryRaw.length < 2) {
+    return {
+      type: "search_order_tags",
+      query: queryRaw,
+      tags: [],
+    };
+  }
+
+  const searchTokens = queryRaw
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => `tag:'${escapeSearchValue(token)}*'`);
+  const searchQuery = searchTokens.join(" AND ");
+
+  try {
+    const tagCounts = new Map<string, number>();
+    let after: string | null = null;
+    let hasNextPage = true;
+    let pagesLoaded = 0;
+    const maxPages = 8;
+
+    while (hasNextPage && pagesLoaded < maxPages) {
+      const response = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
+        variables: {
+          query: searchQuery,
+          after,
+        },
+      });
+      const json = (await response.json()) as {
+        errors?: Array<{ message: string }>;
+        data?: {
+          orders?: {
+            edges?: Array<{
+              node?: {
+                tags?: string[] | null;
+              };
+            }>;
+            pageInfo?: {
+              hasNextPage?: boolean;
+              endCursor?: string | null;
+            };
+          };
+        };
+      };
+
+      if (json.errors && json.errors.length > 0) {
+        return {
+          type: "error",
+          query: queryRaw,
+          error: json.errors.map((error) => error.message).join("; "),
+        };
+      }
+
+      for (const edge of json.data?.orders?.edges ?? []) {
+        for (const tag of edge.node?.tags ?? []) {
+          const normalized = tag.trim();
+          if (!normalized) continue;
+          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
+        }
+      }
+
+      pagesLoaded += 1;
+      const pageInfo = json.data?.orders?.pageInfo;
+      hasNextPage = Boolean(pageInfo?.hasNextPage);
+      after = pageInfo?.endCursor ?? null;
+      if (!after) {
+        hasNextPage = false;
+      }
+    }
+
+    return {
+      type: "search_order_tags",
+      query: queryRaw,
+      tags: rankOrderTags(queryRaw, tagCounts, 100),
+    };
+  } catch (error) {
+    return {
+      type: "error",
+      query: queryRaw,
+      error:
+        error instanceof Error ? error.message : "Failed to search order tags.",
+    };
+  }
+}
+
 async function createCustomer(
   admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
   formData: FormData,
@@ -2369,6 +2594,37 @@ function sortCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
     const bLabel = (b.displayName || b.email || "").toLowerCase();
     return aLabel.localeCompare(bLabel, "en");
   });
+}
+
+function rankOrderTags(
+  query: string,
+  tagCounts: Map<string, number>,
+  max: number,
+): string[] {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const ranked = Array.from(tagCounts.entries()).sort((a, b) => {
+    const aTag = a[0];
+    const bTag = b[0];
+    const aCount = a[1];
+    const bCount = b[1];
+
+    const aLower = aTag.toLowerCase();
+    const bLower = bTag.toLowerCase();
+
+    const aStarts = aLower.startsWith(normalizedQuery);
+    const bStarts = bLower.startsWith(normalizedQuery);
+    if (aStarts !== bStarts) return aStarts ? -1 : 1;
+
+    const aIncludes = aLower.includes(normalizedQuery);
+    const bIncludes = bLower.includes(normalizedQuery);
+    if (aIncludes !== bIncludes) return aIncludes ? -1 : 1;
+
+    if (aCount !== bCount) return bCount - aCount;
+    return aTag.localeCompare(bTag, "en");
+  });
+
+  return ranked.map(([tag]) => tag).slice(0, max);
 }
 
 function formatCustomerOption(customer: CustomerOption): string {
