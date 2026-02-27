@@ -206,6 +206,33 @@ const CUSTOMER_PICKER_STYLES = `
   max-height: 280px;
   overflow-y: auto;
 }
+
+.customer-picker__status {
+  padding: 8px 12px;
+}
+
+.customer-picker__menu [data-customer-row="true"][data-active="true"] {
+  background: var(--p-color-bg-fill-tertiary, #f3f4f6);
+}
+
+.customer-picker__create-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customer-picker__create-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--p-color-border, #d1d5db);
+  color: var(--p-color-text-subdued, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+}
 `;
 
 const ORDER_CREATE_MUTATION = `#graphql
@@ -427,6 +454,7 @@ export default function Index() {
   );
   const [customerInputValue, setCustomerInputValue] = useState("");
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const [activeCustomerMenuIndex, setActiveCustomerMenuIndex] = useState(0);
   const [createCustomerFirstNameInput, setCreateCustomerFirstNameInput] =
     useState("");
   const [createCustomerLastNameInput, setCreateCustomerLastNameInput] =
@@ -621,6 +649,15 @@ export default function Index() {
       })
       .slice(0, 50);
   }, [customerInputValue, customerOptions]);
+  const customerMenuOptionCount = filteredCustomers.length + 1;
+
+  useEffect(() => {
+    if (!isCustomerDropdownOpen) return;
+
+    setActiveCustomerMenuIndex((current) =>
+      Math.max(0, Math.min(current, customerMenuOptionCount - 1)),
+    );
+  }, [isCustomerDropdownOpen, customerMenuOptionCount]);
 
   const updateCustomerMenuPosition = () => {
     const anchor = customerPickerRef.current;
@@ -709,6 +746,7 @@ export default function Index() {
     const value = target.value || "";
     setCustomerInputValue(value);
     setIsCustomerDropdownOpen(true);
+    setActiveCustomerMenuIndex(0);
     updateCustomerMenuPosition();
     setCustomerError("");
     setCustomerMessage("");
@@ -725,8 +763,79 @@ export default function Index() {
 
   const onCustomerFieldFocus = () => {
     setIsCustomerDropdownOpen(true);
+    setActiveCustomerMenuIndex(0);
     updateCustomerMenuPosition();
   };
+
+  const onCustomerFieldKeyDown = (event: KeyboardEvent) => {
+    const key = event?.key;
+    if (!key) return;
+
+    if (key === "ArrowDown") {
+      event.preventDefault();
+      if (!isCustomerDropdownOpen) {
+        setIsCustomerDropdownOpen(true);
+        updateCustomerMenuPosition();
+      }
+      setActiveCustomerMenuIndex((current) =>
+        Math.min(current + 1, customerMenuOptionCount - 1),
+      );
+      return;
+    }
+
+    if (key === "ArrowUp") {
+      event.preventDefault();
+      if (!isCustomerDropdownOpen) {
+        setIsCustomerDropdownOpen(true);
+        updateCustomerMenuPosition();
+      }
+      setActiveCustomerMenuIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+
+    if (key === "Enter" && isCustomerDropdownOpen) {
+      event.preventDefault();
+      if (activeCustomerMenuIndex === 0) {
+        onOpenCreateCustomerModal();
+        return;
+      }
+
+      const selected = filteredCustomers[activeCustomerMenuIndex - 1];
+      if (selected) {
+        onSelectCustomer(selected);
+      }
+      return;
+    }
+
+    if (key === "Escape" && isCustomerDropdownOpen) {
+      event.preventDefault();
+      setIsCustomerDropdownOpen(false);
+      setCustomerMenuRect(null);
+    }
+  };
+
+  useEffect(() => {
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      const picker = customerPickerRef.current;
+      const target = event.target as Node | null;
+
+      if (!picker || !target || !picker.contains(target)) {
+        return;
+      }
+
+      onCustomerFieldKeyDown(event);
+    };
+
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, [
+    isCustomerDropdownOpen,
+    customerMenuOptionCount,
+    activeCustomerMenuIndex,
+    filteredCustomers,
+  ]);
 
   const onSelectCustomer = (customer: CustomerOption) => {
     setSelectedCustomerId(customer.id);
@@ -1066,32 +1175,61 @@ export default function Index() {
               event.preventDefault();
             }}
           >
-            <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
-              <s-text type="strong">+ Create a new customer</s-text>
-            </s-clickable>
+            <div
+              data-customer-row="true"
+              data-active={activeCustomerMenuIndex === 0 ? "true" : "false"}
+              onMouseEnter={() => setActiveCustomerMenuIndex(0)}
+            >
+              <s-clickable onClick={onOpenCreateCustomerModal} padding="small">
+                <span className="customer-picker__create-content">
+                  <span className="customer-picker__create-icon" aria-hidden="true">
+                    +
+                  </span>
+                  <s-text type="strong">Create a new customer</s-text>
+                </span>
+              </s-clickable>
+            </div>
             <s-divider />
+            <div className="customer-picker__status">
+              <s-text color="subdued">
+                {filteredCustomers.length}{" "}
+                {filteredCustomers.length === 1 ? "customer" : "customers"} found
+              </s-text>
+            </div>
             <div className="customer-picker__list">
               {filteredCustomers.length === 0 ? (
                 <s-box padding="small">
                   <s-text color="subdued">No matching customers.</s-text>
                 </s-box>
               ) : (
-                filteredCustomers.map((customer, index) => (
+                filteredCustomers.map((customer, index) => {
+                  const customerMenuIndex = index + 1;
+                  return (
                   <s-box key={customer.id}>
-                    <s-clickable
-                      onClick={() => onSelectCustomer(customer)}
-                      padding="small"
+                    <div
+                      data-customer-row="true"
+                      data-active={
+                        activeCustomerMenuIndex === customerMenuIndex ? "true" : "false"
+                      }
+                      onMouseEnter={() =>
+                        setActiveCustomerMenuIndex(customerMenuIndex)
+                      }
                     >
-                      <s-stack direction="block" gap="none">
-                        <s-text type="strong">{customer.displayName}</s-text>
-                        <s-text color="subdued">
-                          {customer.email || "No email"}
-                        </s-text>
-                      </s-stack>
-                    </s-clickable>
-                    {index < filteredCustomers.length - 1 ? <s-divider /> : null}
+                      <s-clickable
+                        onClick={() => onSelectCustomer(customer)}
+                        padding="small"
+                      >
+                        <s-stack direction="block" gap="none">
+                          <s-text type="strong">{customer.displayName}</s-text>
+                          <s-text color="subdued">
+                            {customer.email || "No email"}
+                          </s-text>
+                        </s-stack>
+                      </s-clickable>
+                    </div>
                   </s-box>
-                ))
+                  );
+                })
               )}
             </div>
           </div>,
