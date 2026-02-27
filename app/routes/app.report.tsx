@@ -167,6 +167,10 @@ export default function ReportPage() {
     () => filterReportRows(reportOrders, reportTableQuery),
     [reportOrders, reportTableQuery],
   );
+  const selectedTags = useMemo(
+    () => splitCommaValues(searchTagsInput),
+    [searchTagsInput],
+  );
 
   const onGenerateReport = () => {
     const formData = new FormData();
@@ -187,7 +191,18 @@ export default function ReportPage() {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const selectedTag = (target.value || "").trim();
     setSelectedReportTagSuggestion(selectedTag);
-    if (!selectedTag) return;
+    if (!selectedTag) {
+      setSelectedReportTagSuggestion("");
+      return;
+    }
+
+    const isSuggestedTag = reportTagSuggestions.some(
+      (tag) => tag.toLowerCase() === selectedTag.toLowerCase(),
+    );
+    if (!isSuggestedTag) {
+      setSelectedReportTagSuggestion("");
+      return;
+    }
 
     setSearchTagsInput((existing) => appendUniqueCommaValue(existing, selectedTag));
     setSelectedReportTagSuggestion("");
@@ -251,18 +266,27 @@ export default function ReportPage() {
               </>
             ) : null}
 
-            {searchTagsInput ? (
-              <s-stack direction="inline" gap="base" justifyContent="space-between">
-                <s-text color="subdued">Selected tags: {searchTagsInput}</s-text>
-                <s-button
-                  variant="secondary"
-                  onClick={() => {
-                    setSearchTagsInput("");
-                    setSelectedReportTagSuggestion("");
-                  }}
-                >
-                  Clear tags
-                </s-button>
+            {selectedTags.length > 0 ? (
+              <s-stack direction="block" gap="small">
+                <s-text color="subdued">Selected tags</s-text>
+                <s-stack direction="inline" gap="small">
+                  {selectedTags.map((tag) => (
+                    <s-stack key={tag} direction="inline" gap="none">
+                      <s-badge>{tag}</s-badge>
+                      <s-button
+                        variant="tertiary"
+                        onClick={() => {
+                          setSearchTagsInput((existing) =>
+                            removeCommaValue(existing, tag),
+                          );
+                          setSelectedReportTagSuggestion("");
+                        }}
+                      >
+                        x
+                      </s-button>
+                    </s-stack>
+                  ))}
+                </s-stack>
               </s-stack>
             ) : null}
 
@@ -488,6 +512,16 @@ function appendUniqueCommaValue(existing: string, nextValue: string): string {
 
   if (hasValue) return currentValues.join(", ");
   return [...currentValues, nextNormalized].join(", ");
+}
+
+function removeCommaValue(existing: string, toRemove: string): string {
+  const values = splitCommaValues(existing);
+  const normalizedToRemove = toRemove.trim().toLowerCase();
+  if (!normalizedToRemove) return existing;
+
+  return values
+    .filter((value) => value.toLowerCase() !== normalizedToRemove)
+    .join(", ");
 }
 
 function filterReportRows(
