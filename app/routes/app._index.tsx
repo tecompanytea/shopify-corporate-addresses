@@ -496,7 +496,6 @@ export default function Index() {
     null,
   );
   const customerPickerRef = useRef<HTMLDivElement | null>(null);
-  const customerFieldElementRef = useRef<HTMLElement | null>(null);
   const customerMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isCreating = createFetcher.state === "submitting";
@@ -685,26 +684,14 @@ export default function Index() {
       .slice(0, 50);
   }, [customerInputValue, customerOptions]);
 
-  const resolveCustomerAnchor = () => {
-    if (customerFieldElementRef.current) {
-      return customerFieldElementRef.current;
-    }
-
-    return customerPickerRef.current?.querySelector<HTMLElement>(
-      "s-search-field",
-    );
-  };
-
   const updateCustomerMenuPosition = () => {
-    const field = resolveCustomerAnchor();
-    if (!field) {
+    const anchor = customerPickerRef.current;
+    if (!anchor) {
       setCustomerMenuRect(null);
       return;
     }
 
-    customerFieldElementRef.current = field;
-
-    const rect = field.getBoundingClientRect();
+    const rect = anchor.getBoundingClientRect();
     const viewportPadding = 8;
     const menuMaxHeight = Math.min(320, window.innerHeight - 24);
     const width = Math.max(rect.width, 280);
@@ -780,7 +767,6 @@ export default function Index() {
   const onCustomerFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
-    customerFieldElementRef.current = target;
     setCustomerInputValue(value);
     setIsCustomerDropdownOpen(true);
     updateCustomerMenuPosition();
@@ -797,8 +783,7 @@ export default function Index() {
     }
   };
 
-  const onCustomerFieldFocus = (event: Event) => {
-    customerFieldElementRef.current = event.currentTarget as HTMLElement;
+  const onCustomerFieldFocus = () => {
     setIsCustomerDropdownOpen(true);
     updateCustomerMenuPosition();
   };

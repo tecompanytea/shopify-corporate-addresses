@@ -19,7 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const host = Buffer.from(
       `admin.shopify.com/store/${storeHandle}`,
       "utf8",
-    ).toString("base64url");
+    ).toString("base64");
 
     url.searchParams.set("host", host);
     url.searchParams.set("shop", shopDomain);
