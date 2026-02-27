@@ -299,7 +299,7 @@ export default function ReportPage() {
         </s-section>
 
         {reportOrders.length > 0 ? (
-          <s-section heading="Shipping Report Results" padding="none">
+          <s-section padding="none">
             <s-table>
               <s-search-field
                 slot="filters"
