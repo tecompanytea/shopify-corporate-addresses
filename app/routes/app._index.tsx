@@ -2587,10 +2587,7 @@ function rankOrderTags(
   const matchingEntries = Array.from(tagCounts.entries()).filter(([tag]) => {
     if (!normalizedQuery) return true;
     const lower = tag.toLowerCase();
-    return (
-      lower.startsWith(normalizedQuery) ||
-      lower.includes(normalizedQuery)
-    );
+    return lower.startsWith(normalizedQuery);
   });
 
   const ranked = matchingEntries.sort((a, b) => {
@@ -2605,10 +2602,6 @@ function rankOrderTags(
     const aStarts = aLower.startsWith(normalizedQuery);
     const bStarts = bLower.startsWith(normalizedQuery);
     if (aStarts !== bStarts) return aStarts ? -1 : 1;
-
-    const aIncludes = aLower.includes(normalizedQuery);
-    const bIncludes = bLower.includes(normalizedQuery);
-    if (aIncludes !== bIncludes) return aIncludes ? -1 : 1;
 
     if (aCount !== bCount) return bCount - aCount;
     return aTag.localeCompare(bTag, "en");
@@ -2636,18 +2629,15 @@ function rankOrderTagList(query: string, tags: string[], max: number): string[] 
   }
 
   const startsWith: string[] = [];
-  const includes: string[] = [];
 
   for (const tag of deduped) {
     const lower = tag.toLowerCase();
     if (lower.startsWith(normalizedQuery)) {
       startsWith.push(tag);
-    } else if (lower.includes(normalizedQuery)) {
-      includes.push(tag);
     }
   }
 
-  return [...startsWith, ...includes].slice(0, max);
+  return startsWith.slice(0, max);
 }
 
 function mergeUniqueTags(...groups: string[][]): string[] {
