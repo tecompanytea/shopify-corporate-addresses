@@ -1533,59 +1533,62 @@ export default function Index() {
             </s-section>
 
             {parseResult ? (
-              <s-section padding="none">
-                <s-table>
-                  <s-search-field
-                    slot="filters"
-                    label="Search parsed rows"
-                    placeholder="Search by name, address, city, or ZIP"
-                    value={parsedTableQuery}
-                    onInput={(event: Event) => {
-                      const target = event.currentTarget as HTMLElement & {
-                        value?: string;
-                      };
-                      setParsedTableQuery(target.value || "");
-                    }}
-                  />
-                  <s-table-header-row>
-                    <s-table-header listSlot="kicker">Row</s-table-header>
-                    <s-table-header listSlot="primary">First Name</s-table-header>
-                    <s-table-header listSlot="labeled">Last Name</s-table-header>
-                    <s-table-header listSlot="labeled">Address</s-table-header>
-                    <s-table-header listSlot="labeled">City</s-table-header>
-                    <s-table-header listSlot="labeled">State</s-table-header>
-                    <s-table-header listSlot="labeled">Zip Code</s-table-header>
-                  </s-table-header-row>
-                  <s-table-body>
-                    {filteredPreviewRows.length === 0 ? (
-                      <s-table-row>
-                        <s-table-cell>No matching rows.</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                        <s-table-cell>-</s-table-cell>
-                      </s-table-row>
-                    ) : (
-                      filteredPreviewRows.map((row) => {
-                        const [firstName, ...lastParts] = row.recipient.split(" ");
-                        return (
-                          <s-table-row key={row.rowNumber}>
-                            <s-table-cell>{row.rowNumber}</s-table-cell>
-                            <s-table-cell>{firstName || "-"}</s-table-cell>
-                            <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
-                            <s-table-cell>{row.address || "-"}</s-table-cell>
-                            <s-table-cell>{row.city || "-"}</s-table-cell>
-                            <s-table-cell>{row.state || "-"}</s-table-cell>
-                            <s-table-cell>{row.zipCode || "-"}</s-table-cell>
-                          </s-table-row>
-                        );
-                      })
-                    )}
-                  </s-table-body>
-                </s-table>
-              </s-section>
+              <>
+                <s-banner tone="success">Parsed CSV data ready.</s-banner>
+                <s-section padding="none">
+                  <s-table>
+                    <s-search-field
+                      slot="filters"
+                      label="Search parsed rows"
+                      placeholder="Search by name, address, city, or ZIP"
+                      value={parsedTableQuery}
+                      onInput={(event: Event) => {
+                        const target = event.currentTarget as HTMLElement & {
+                          value?: string;
+                        };
+                        setParsedTableQuery(target.value || "");
+                      }}
+                    />
+                    <s-table-header-row>
+                      <s-table-header listSlot="kicker">Row</s-table-header>
+                      <s-table-header listSlot="primary">First Name</s-table-header>
+                      <s-table-header listSlot="labeled">Last Name</s-table-header>
+                      <s-table-header listSlot="labeled">Address</s-table-header>
+                      <s-table-header listSlot="labeled">City</s-table-header>
+                      <s-table-header listSlot="labeled">State</s-table-header>
+                      <s-table-header listSlot="labeled">Zip Code</s-table-header>
+                    </s-table-header-row>
+                    <s-table-body>
+                      {filteredPreviewRows.length === 0 ? (
+                        <s-table-row>
+                          <s-table-cell>No matching rows.</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                          <s-table-cell>-</s-table-cell>
+                        </s-table-row>
+                      ) : (
+                        filteredPreviewRows.map((row) => {
+                          const [firstName, ...lastParts] = row.recipient.split(" ");
+                          return (
+                            <s-table-row key={row.rowNumber}>
+                              <s-table-cell>{row.rowNumber}</s-table-cell>
+                              <s-table-cell>{firstName || "-"}</s-table-cell>
+                              <s-table-cell>{lastParts.join(" ") || "-"}</s-table-cell>
+                              <s-table-cell>{row.address || "-"}</s-table-cell>
+                              <s-table-cell>{row.city || "-"}</s-table-cell>
+                              <s-table-cell>{row.state || "-"}</s-table-cell>
+                              <s-table-cell>{row.zipCode || "-"}</s-table-cell>
+                            </s-table-row>
+                          );
+                        })
+                      )}
+                    </s-table-body>
+                  </s-table>
+                </s-section>
+              </>
             ) : null}
 
             {results.length > 0 ? (
