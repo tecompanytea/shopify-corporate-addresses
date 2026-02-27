@@ -274,9 +274,6 @@ export default function ReportPage() {
               >
                 Generate Report
               </s-button>
-              <s-button onClick={onExportReport} disabled={reportOrders.length === 0}>
-                Export to CSV
-              </s-button>
             </s-stack>
           </s-stack>
         </s-section>
