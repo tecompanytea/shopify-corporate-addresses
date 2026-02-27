@@ -869,7 +869,7 @@ export default function Index() {
     const query = orderTagInputValue.trim().toLowerCase();
 
     if (!query) {
-      return orderTagSuggestions.slice(0, 50);
+      return [];
     }
 
     return orderTagSuggestions
@@ -1147,14 +1147,22 @@ export default function Index() {
   const onOrderTagFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
+    const query = value.trim();
     setOrderTagInputValue(value);
-    setIsOrderTagDropdownOpen(true);
-    updateOrderTagMenuPosition();
+    const shouldOpen = query.length > 0;
+    setIsOrderTagDropdownOpen(shouldOpen);
+    if (shouldOpen) {
+      updateOrderTagMenuPosition();
+    } else {
+      setOrderTagMenuRect(null);
+    }
   };
 
   const onOrderTagFieldFocus = () => {
-    setIsOrderTagDropdownOpen(true);
-    updateOrderTagMenuPosition();
+    if (orderTagInputValue.trim().length > 0) {
+      setIsOrderTagDropdownOpen(true);
+      updateOrderTagMenuPosition();
+    }
   };
 
   const onToggleOrderTag = (tag: string) => {
@@ -1186,8 +1194,8 @@ export default function Index() {
       return [...existing, value];
     });
     setOrderTagInputValue("");
-    setIsOrderTagDropdownOpen(true);
-    updateOrderTagMenuPosition();
+    setIsOrderTagDropdownOpen(false);
+    setOrderTagMenuRect(null);
   };
 
   useEffect(() => {
