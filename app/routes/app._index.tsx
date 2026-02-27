@@ -994,41 +994,18 @@ export default function Index() {
       return [];
     }
 
-    const baseSuggestions =
-      query.length >= 2
-        ? orderTagSearchQuery === orderTagInputValue.trim()
-          ? orderTagSearchResults
-          : []
-        : orderTagSuggestions;
+    const localRanked = rankOrderTagList(query, orderTagSuggestions, 200);
+    const hasFreshServerResults =
+      query.length >= 2 &&
+      orderTagSearchQuery === orderTagInputValue.trim() &&
+      orderTagSearchResults.length > 0;
 
-    const unique = new Set<string>();
-    const deduped: string[] = [];
-
-    for (const tag of baseSuggestions) {
-      const normalized = tag.trim();
-      if (!normalized) continue;
-      const key = normalized.toLowerCase();
-      if (unique.has(key)) continue;
-      unique.add(key);
-      deduped.push(normalized);
+    if (!hasFreshServerResults) {
+      return localRanked.slice(0, 100);
     }
 
-    const startsWith: string[] = [];
-    const includes: string[] = [];
-    const others: string[] = [];
-
-    for (const tag of deduped) {
-      const normalized = tag.toLowerCase();
-      if (normalized.startsWith(query)) {
-        startsWith.push(tag);
-      } else if (normalized.includes(query)) {
-        includes.push(tag);
-      } else {
-        others.push(tag);
-      }
-    }
-
-    return [...startsWith, ...includes, ...others].slice(0, 100);
+    const merged = mergeUniqueTags(orderTagSearchResults, localRanked);
+    return rankOrderTagList(query, merged, 100);
   }, [
     orderTagInputValue,
     orderTagSearchQuery,
@@ -2625,6 +2602,56 @@ function rankOrderTags(
   });
 
   return ranked.map(([tag]) => tag).slice(0, max);
+}
+
+function rankOrderTagList(query: string, tags: string[], max: number): string[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const unique = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (unique.has(key)) continue;
+    unique.add(key);
+    deduped.push(tag);
+  }
+
+  const startsWith: string[] = [];
+  const includes: string[] = [];
+  const others: string[] = [];
+
+  for (const tag of deduped) {
+    const lower = tag.toLowerCase();
+    if (lower.startsWith(normalizedQuery)) {
+      startsWith.push(tag);
+    } else if (lower.includes(normalizedQuery)) {
+      includes.push(tag);
+    } else {
+      others.push(tag);
+    }
+  }
+
+  return [...startsWith, ...includes, ...others].slice(0, max);
+}
+
+function mergeUniqueTags(...groups: string[][]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const group of groups) {
+    for (const rawTag of group) {
+      const tag = rawTag.trim();
+      if (!tag) continue;
+      const key = tag.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(tag);
+    }
+  }
+
+  return merged;
 }
 
 function formatCustomerOption(customer: CustomerOption): string {
