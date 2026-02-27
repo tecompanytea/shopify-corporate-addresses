@@ -119,26 +119,6 @@ const SHIPPING_REPORT_QUERY = `#graphql
   }
 `;
 
-const DRAFT_REPORT_TAG_SUGGESTIONS_QUERY = `#graphql
-  query DraftReportTagSuggestions {
-    draftOrderTags(first: 250, sortKey: POPULAR) {
-      edges {
-        node
-      }
-    }
-  }
-`;
-
-const SEARCH_DRAFT_REPORT_TAGS_QUERY = `#graphql
-  query SearchDraftReportTags($query: String!) {
-    draftOrderTags(first: 250, sortKey: POPULAR, query: $query) {
-      edges {
-        node
-      }
-    }
-  }
-`;
-
 const REPORT_TAG_SUGGESTIONS_QUERY = `#graphql
   query ReportTagSuggestions {
     shop {
@@ -798,32 +778,6 @@ async function loadShopReportTags(
   if (query) {
     try {
       const searchQuery = `title:${escapeSearchToken(query)}*`;
-      const searched = await admin.graphql(SEARCH_DRAFT_REPORT_TAGS_QUERY, {
-        variables: { query: searchQuery },
-      });
-      const searchedJson = (await searched.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          draftOrderTags?: {
-            edges?: Array<{
-              node?: string | null;
-            }>;
-          } | null;
-        };
-      };
-
-      if (!searchedJson.errors || searchedJson.errors.length === 0) {
-        const tags = readReportTagConnectionValues(searchedJson.data?.draftOrderTags);
-        if (tags.length > 0) {
-          return { tags };
-        }
-      }
-    } catch {
-      // Continue to other sources.
-    }
-
-    try {
-      const searchQuery = `title:${escapeSearchToken(query)}*`;
       const searched = await admin.graphql(SEARCH_REPORT_TAGS_QUERY, {
         variables: { query: searchQuery },
       });
@@ -854,29 +808,6 @@ async function loadShopReportTags(
     }
 
     return loadReportTagsFromOrders(admin, query);
-  }
-
-  try {
-    const response = await admin.graphql(DRAFT_REPORT_TAG_SUGGESTIONS_QUERY);
-    const json = (await response.json()) as {
-      errors?: Array<{ message: string }>;
-      data?: {
-        draftOrderTags?: {
-          edges?: Array<{
-            node?: string | null;
-          }>;
-        } | null;
-      };
-    };
-
-    if (!json.errors || json.errors.length === 0) {
-      const tags = readReportTagConnectionValues(json.data?.draftOrderTags);
-      if (tags.length > 0) {
-        return { tags };
-      }
-    }
-  } catch {
-    // Continue to other sources.
   }
 
   try {
