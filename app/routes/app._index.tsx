@@ -959,13 +959,11 @@ export default function Index() {
             </s-section>
 
             {parseResult ? (
-              <s-section heading="Parsed CSV Data">
+              <s-section heading="Parsed CSV Data" padding="none">
                 <s-box padding="base">
-                  <s-stack gap="base" direction="block">
-                    <s-text color="subdued">
-                      {parseResult.rowCount} rows ready to import
-                    </s-text>
-                  </s-stack>
+                  <s-text color="subdued">
+                    {parseResult.rowCount} rows ready to import
+                  </s-text>
                 </s-box>
 
                 <s-box padding="base">
