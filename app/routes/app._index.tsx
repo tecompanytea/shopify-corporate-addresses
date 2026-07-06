@@ -1518,12 +1518,11 @@ export default function Index() {
               <s-stack direction="block" gap="base">
                 <s-text color="subdued">
                   Upload a CSV file with columns: first_name, last_name, address,
-                  address2, city, state, zip_code
+                  address2, city, state, zip_code.{" "}
+                  <s-link onClick={onDownloadSampleCsv}>
+                    Download a sample CSV
+                  </s-link>
                 </s-text>
-
-                <s-button variant="tertiary" onClick={onDownloadSampleCsv}>
-                  Download sample CSV
-                </s-button>
 
                 <s-drop-zone
                   label="Upload CSV"
@@ -2087,20 +2086,8 @@ function parseCsvRows(csvText: string): string[][] {
   return rows;
 }
 
-const SAMPLE_CSV_ROW = [
-  "Jordan",
-  "Rivera",
-  "100 Market St",
-  "Suite 200",
-  "Newark",
-  "NJ",
-  "07001",
-];
-
 function buildSampleCsv(): string {
-  return [REQUIRED_COLUMNS, SAMPLE_CSV_ROW]
-    .map((row) => row.map(csvEscapeField).join(","))
-    .join("\n");
+  return `${REQUIRED_COLUMNS.map(csvEscapeField).join(",")}\n`;
 }
 
 function csvEscapeField(value: string): string {
