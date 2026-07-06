@@ -1184,6 +1184,10 @@ export default function Index() {
     setParseNotice("Please upload a .csv file.");
   };
 
+  const onDownloadSampleCsv = () => {
+    downloadCsv("corporate-addresses-template.csv", buildSampleCsv());
+  };
+
   const onCustomerFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
@@ -1516,6 +1520,10 @@ export default function Index() {
                   Upload a CSV file with columns: first_name, last_name, address,
                   address2, city, state, zip_code
                 </s-text>
+
+                <s-button variant="tertiary" onClick={onDownloadSampleCsv}>
+                  Download sample CSV
+                </s-button>
 
                 <s-drop-zone
                   label="Upload CSV"
@@ -2077,6 +2085,43 @@ function parseCsvRows(csvText: string): string[][] {
   }
 
   return rows;
+}
+
+const SAMPLE_CSV_ROW = [
+  "Jordan",
+  "Rivera",
+  "100 Market St",
+  "Suite 200",
+  "Newark",
+  "NJ",
+  "07001",
+];
+
+function buildSampleCsv(): string {
+  return [REQUIRED_COLUMNS, SAMPLE_CSV_ROW]
+    .map((row) => row.map(csvEscapeField).join(","))
+    .join("\n");
+}
+
+function csvEscapeField(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function downloadCsv(fileName: string, content: string): void {
+  if (typeof window === "undefined") return;
+
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 function normalizeHeader(value: string): string {
