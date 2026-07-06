@@ -1188,6 +1188,15 @@ export default function Index() {
     downloadCsv("corporate-addresses-template.csv", buildSampleCsv());
   };
 
+  const onReplaceFile = () => {
+    setFileName("");
+    setParseResult(null);
+    setParseNotice("");
+    setImportResult(null);
+    setParsedTableQuery("");
+    setCreatedTableQuery("");
+  };
+
   const onCustomerFieldInput = (event: Event) => {
     const target = event.currentTarget as HTMLElement & { value?: string };
     const value = target.value || "";
@@ -1463,17 +1472,9 @@ export default function Index() {
 
   return (
     <s-page heading="Corporate Addresses">
-      {parseResult ? (
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          onClick={onCreateOrders}
-          {...(isCreating ? { loading: true } : {})}
-          disabled={!canCreate}
-        >
-          Create Orders
-        </s-button>
-      ) : null}
+      <s-button slot="secondary-actions" variant="secondary" href="/app/report">
+        New Report
+      </s-button>
 
       <style>{CUSTOMER_PICKER_STYLES}</style>
 
@@ -1516,26 +1517,31 @@ export default function Index() {
           <s-stack direction="block" gap="base">
             <s-section heading="Upload CSV File">
               <s-stack direction="block" gap="base">
-                <s-text color="subdued">
-                  Upload a CSV file with columns: first_name, last_name, address,
-                  address2, city, state, zip_code.{" "}
-                  <s-link onClick={onDownloadSampleCsv}>
-                    Download a sample CSV
-                  </s-link>
-                </s-text>
+                {parseResult ? (
+                  <s-stack direction="inline" gap="base" alignItems="center">
+                    <s-text>
+                      <s-text type="strong">Selected file:</s-text> {fileName}
+                    </s-text>
+                    <s-link onClick={onReplaceFile}>Replace file</s-link>
+                  </s-stack>
+                ) : (
+                  <>
+                    <s-text color="subdued">
+                      Upload a CSV file with columns: first_name, last_name,
+                      address, address2, city, state, zip_code.{" "}
+                      <s-link onClick={onDownloadSampleCsv}>
+                        Download a sample CSV
+                      </s-link>
+                    </s-text>
 
-                <s-drop-zone
-                  label="Upload CSV"
-                  accept=".csv,text/csv"
-                  onInput={onDropZoneInput}
-                  onDropRejected={onDropZoneRejected}
-                />
-
-                {fileName ? (
-                  <s-text>
-                    <s-text type="strong">Selected file:</s-text> {fileName}
-                  </s-text>
-                ) : null}
+                    <s-drop-zone
+                      label="Upload CSV"
+                      accept=".csv,text/csv"
+                      onInput={onDropZoneInput}
+                      onDropRejected={onDropZoneRejected}
+                    />
+                  </>
+                )}
               </s-stack>
             </s-section>
 
@@ -1557,7 +1563,7 @@ export default function Index() {
                       }}
                     />
                     <s-table-header-row>
-                      <s-table-header listSlot="kicker">Row</s-table-header>
+                      <s-table-header listSlot="kicker">Line</s-table-header>
                       <s-table-header listSlot="primary">First Name</s-table-header>
                       <s-table-header listSlot="labeled">Last Name</s-table-header>
                       <s-table-header listSlot="labeled">Address</s-table-header>
@@ -1614,7 +1620,7 @@ export default function Index() {
                     }}
                   />
                   <s-table-header-row>
-                    <s-table-header listSlot="kicker">Row</s-table-header>
+                    <s-table-header listSlot="kicker">Line</s-table-header>
                     <s-table-header listSlot="primary">Recipient</s-table-header>
                     <s-table-header listSlot="labeled">Status</s-table-header>
                     <s-table-header listSlot="labeled">Error</s-table-header>
@@ -1653,17 +1659,6 @@ export default function Index() {
 
         <div className="Polaris-Layout__Section Polaris-Layout__Section--oneThird">
           <s-stack direction="block" gap="base">
-            <s-section heading="Shipping Report">
-              <s-stack gap="base" direction="block">
-                <s-text color="subdued">
-                  You will be able to select the particular data items to export.
-                </s-text>
-                <s-button variant="primary" href="/app/report">
-                  New Report
-                </s-button>
-              </s-stack>
-            </s-section>
-
             <s-section heading="Order Settings">
               <s-stack direction="block" gap="base">
                 <div className="customer-picker" ref={customerPickerRef}>
@@ -1713,6 +1708,19 @@ export default function Index() {
           </s-stack>
         </div>
       </div>
+
+      {parseResult ? (
+        <s-stack direction="inline" gap="base" justifyContent="end">
+          <s-button
+            variant="primary"
+            onClick={onCreateOrders}
+            {...(isCreating ? { loading: true } : {})}
+            disabled={!canCreate}
+          >
+            Create Orders
+          </s-button>
+        </s-stack>
+      ) : null}
 
       {isHydrated && isCustomerDropdownOpen && customerMenuRect ? (
         createPortal(

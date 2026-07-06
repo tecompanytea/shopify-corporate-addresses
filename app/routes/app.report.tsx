@@ -598,6 +598,10 @@ export default function ReportPage() {
 
   return (
     <s-page heading="Shipping Report">
+      <s-link slot="breadcrumb-actions" href="/app">
+        Corporate Addresses
+      </s-link>
+
       <s-button
         slot="primary-action"
         variant="primary"
