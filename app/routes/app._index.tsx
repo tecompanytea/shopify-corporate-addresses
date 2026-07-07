@@ -345,7 +345,7 @@ const SEARCH_CUSTOMERS_QUERY = `#graphql
 const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
   query OrderTagSuggestions {
     shop {
-      orderTags(first: 250, sortKey: POPULAR) {
+      orderTags(first: 250, sort: POPULAR) {
         edges {
           node
         }
@@ -357,37 +357,9 @@ const ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
 const DRAFT_ORDER_TAG_SUGGESTIONS_QUERY = `#graphql
   query DraftOrderTagSuggestions {
     shop {
-      draftOrderTags(first: 250, sortKey: POPULAR) {
-        edges {
-          node {
-            title
-          }
-        }
-      }
-    }
-  }
-`;
-
-const SEARCH_ORDER_TAGS_QUERY = `#graphql
-  query SearchOrderTags($query: String!) {
-    shop {
-      orderTags(first: 250, sortKey: POPULAR, query: $query) {
+      draftOrderTags(first: 250) {
         edges {
           node
-        }
-      }
-    }
-  }
-`;
-
-const SEARCH_DRAFT_ORDER_TAGS_QUERY = `#graphql
-  query SearchDraftOrderTags($query: String!) {
-    shop {
-      draftOrderTags(first: 250, sortKey: POPULAR, query: $query) {
-        edges {
-          node {
-            title
-          }
         }
       }
     }
@@ -2394,39 +2366,8 @@ async function loadShopOrderTags(
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
   if (query) {
-    let draftSearchTags: string[] = [];
     let draftBaselineTags: string[] = [];
-    let searchTags: string[] = [];
     let baselineTags: string[] = [];
-    const searchQuery = `title:${escapeSearchToken(query.toLowerCase())}*`;
-
-    try {
-      const searchedDraft = await admin.graphql(SEARCH_DRAFT_ORDER_TAGS_QUERY, {
-        variables: { query: searchQuery },
-      });
-      const searchedDraftJson = (await searchedDraft.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          shop?: {
-            draftOrderTags?: {
-              edges?: Array<{
-                node?: {
-                  title?: string | null;
-                } | null;
-              }>;
-            } | null;
-          } | null;
-        };
-      };
-
-      if (!searchedDraftJson.errors || searchedDraftJson.errors.length === 0) {
-        draftSearchTags = readDraftTagConnectionValues(
-          searchedDraftJson.data?.shop?.draftOrderTags,
-        );
-      }
-    } catch {
-      // Continue to fallback logic below.
-    }
 
     try {
       const baselineDraftResponse = await admin.graphql(
@@ -2438,9 +2379,7 @@ async function loadShopOrderTags(
           shop?: {
             draftOrderTags?: {
               edges?: Array<{
-                node?: {
-                  title?: string | null;
-                } | null;
+                node?: string | null;
               }>;
             } | null;
           } | null;
@@ -2454,30 +2393,6 @@ async function loadShopOrderTags(
       }
     } catch {
       // Continue to fallback logic below.
-    }
-
-    try {
-      const searched = await admin.graphql(SEARCH_ORDER_TAGS_QUERY, {
-        variables: { query: searchQuery },
-      });
-      const searchedJson = (await searched.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          shop?: {
-            orderTags?: {
-              edges?: Array<{
-                node?: string | null;
-              }>;
-            } | null;
-          } | null;
-        };
-      };
-
-      if (!searchedJson.errors || searchedJson.errors.length === 0) {
-        searchTags = readTagConnectionValues(searchedJson.data?.shop?.orderTags);
-      }
-    } catch {
-      // Continue to baseline/fallback logic below.
     }
 
     try {
@@ -2506,27 +2421,16 @@ async function loadShopOrderTags(
       admin,
       query,
     );
+    const orderTagsFromOrders = await loadOrderTagsFromOrders(admin, query);
     const merged = mergeUniqueTags(
-      draftSearchTags,
       draftBaselineTags,
-      searchTags,
       baselineTags,
       draftOrderTagsFromDraftOrders.tags,
+      orderTagsFromOrders.tags,
     );
     const ranked = rankOrderTagList(query, merged, 100);
     if (ranked.length > 0) {
       return { tags: ranked };
-    }
-
-    const orderTagsFromOrders = await loadOrderTagsFromOrders(admin, query);
-    if (orderTagsFromOrders.tags.length > 0) {
-      return {
-        tags: rankOrderTagList(
-          query,
-          mergeUniqueTags(merged, orderTagsFromOrders.tags),
-          100,
-        ),
-      };
     }
 
     if (draftOrderTagsFromDraftOrders.error && orderTagsFromOrders.error) {
@@ -2555,9 +2459,7 @@ async function loadShopOrderTags(
         shop?: {
           draftOrderTags?: {
             edges?: Array<{
-              node?: {
-                title?: string | null;
-              } | null;
+              node?: string | null;
             }>;
           } | null;
         } | null;
@@ -2809,9 +2711,7 @@ function readDraftTagConnectionValues(
   connection:
     | {
         edges?: Array<{
-          node?: {
-            title?: string | null;
-          } | null;
+          node?: string | null;
         }>;
       }
     | null
@@ -2821,7 +2721,7 @@ function readDraftTagConnectionValues(
   const values: string[] = [];
 
   for (const edge of connection?.edges ?? []) {
-    const tag = edge.node?.title?.trim();
+    const tag = edge.node?.trim();
     if (!tag) continue;
     const key = tag.toLowerCase();
     if (seen.has(key)) continue;
