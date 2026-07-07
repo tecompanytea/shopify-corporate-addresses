@@ -1472,7 +1472,7 @@ export default function Index() {
 
   return (
     <s-page heading="Corporate Addresses">
-      <s-button slot="secondary-actions" variant="secondary" href="/app/report">
+      <s-button slot="primary-action" variant="primary" href="/app/report">
         New Report
       </s-button>
 
