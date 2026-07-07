@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ActionFunctionArgs,
@@ -69,26 +69,24 @@ const REPORT_TAG_PICKER_STYLES = `
   background: var(--p-color-bg-fill-tertiary, #f3f4f6);
 }
 
-.report-tag-picker__checkbox {
+.report-tag-picker__action-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-tag-picker__icon {
   width: 16px;
   height: 16px;
-  border: 1px solid var(--p-color-border, #d1d5db);
-  border-radius: 4px;
+  color: var(--p-color-text-subdued, #6b7280);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
 }
 
-.report-tag-picker__checkbox--checked {
-  border-color: var(--p-color-bg-fill-emphasis, #111827);
-  background: var(--p-color-bg-fill-emphasis, #111827);
-  color: var(--p-color-text-on-fill, #fff);
-}
-
-.report-tag-picker__checkbox svg {
-  width: 12px;
-  height: 12px;
+.report-tag-picker__icon svg {
+  width: 16px;
+  height: 16px;
   display: block;
   fill: currentColor;
 }
@@ -439,6 +437,27 @@ export default function ReportPage() {
     reportTagSuggestions,
   ]);
 
+  const canAddTypedReportTag = useMemo(() => {
+    const value = reportTagInputValue.trim();
+    if (!value) return false;
+
+    const normalized = value.toLowerCase();
+    const alreadySelected = selectedReportTags.some(
+      (tag) => tag.toLowerCase() === normalized,
+    );
+    if (alreadySelected) return false;
+
+    const alreadyExists =
+      reportTagSuggestions.some((tag) => tag.toLowerCase() === normalized) ||
+      reportTagSearchResults.some((tag) => tag.toLowerCase() === normalized);
+    return !alreadyExists;
+  }, [
+    reportTagInputValue,
+    reportTagSearchResults,
+    reportTagSuggestions,
+    selectedReportTags,
+  ]);
+
   const onGenerateReport = () => {
     const formData = new FormData();
     formData.append("intent", "generate_report");
@@ -573,6 +592,21 @@ export default function ReportPage() {
     );
   };
 
+  const onAddTypedReportTag = useCallback(() => {
+    const value = reportTagInputValue.trim();
+    if (!value) return;
+
+    setSelectedReportTags((existing) => {
+      if (existing.some((item) => item.toLowerCase() === value.toLowerCase())) {
+        return existing;
+      }
+      return [...existing, value];
+    });
+    setReportTagInputValue("");
+    setIsReportTagDropdownOpen(false);
+    setReportTagMenuRect(null);
+  }, [reportTagInputValue]);
+
   useEffect(() => {
     const onDocumentKeyDown = (event: KeyboardEvent) => {
       const picker = reportTagPickerRef.current;
@@ -588,13 +622,19 @@ export default function ReportPage() {
         setReportTagMenuRect(null);
       }
 
+      if (event.key === "Enter") {
+        if (canAddTypedReportTag) {
+          event.preventDefault();
+          onAddTypedReportTag();
+        }
+      }
     };
 
     document.addEventListener("keydown", onDocumentKeyDown);
     return () => {
       document.removeEventListener("keydown", onDocumentKeyDown);
     };
-  }, [isReportTagDropdownOpen]);
+  }, [canAddTypedReportTag, isReportTagDropdownOpen, onAddTypedReportTag]);
 
   return (
     <s-page heading="Shipping Report">
@@ -753,6 +793,7 @@ export default function ReportPage() {
         createPortal(
           <div
             ref={reportTagMenuRef}
+            role="presentation"
             className="report-tag-picker__menu"
             style={{
               top: `${reportTagMenuRect.top}px`,
@@ -763,6 +804,29 @@ export default function ReportPage() {
               event.preventDefault();
             }}
           >
+            {canAddTypedReportTag ? (
+              <>
+                <div data-report-tag-row="true">
+                  <s-clickable onClick={onAddTypedReportTag} padding="small">
+                    <span className="report-tag-picker__action-content">
+                      <span className="report-tag-picker__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+                          <path d="M4.25 8a.75.75 0 0 1 .75-.75h2.25v-2.25a.75.75 0 0 1 1.5 0v2.25h2.25a.75.75 0 0 1 0 1.5h-2.25v2.25a.75.75 0 0 1-1.5 0v-2.25h-2.25a.75.75 0 0 1-.75-.75" />
+                          <path
+                            fillRule="evenodd"
+                            d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14m0-1.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 1 0 0 11"
+                          />
+                        </svg>
+                      </span>
+                      <s-text>
+                        <s-text type="strong">Add</s-text> {reportTagInputValue.trim()}
+                      </s-text>
+                    </span>
+                  </s-clickable>
+                </div>
+                <s-divider />
+              </>
+            ) : null}
             <div className="report-tag-picker__list">
               {isSearchingReportTags ? (
                 <div className="report-tag-picker__loading">
@@ -786,21 +850,13 @@ export default function ReportPage() {
                   );
                   return (
                     <div key={tag} data-report-tag-row="true">
-                      <s-clickable onClick={() => onToggleReportTag(tag)} padding="small">
-                        <s-stack direction="inline" gap="small">
-                          <span
-                            className={`report-tag-picker__checkbox${isSelected ? " report-tag-picker__checkbox--checked" : ""}`}
-                            aria-hidden="true"
-                          >
-                            {isSelected ? (
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-                                <path d="M6.53 10.78a.75.75 0 0 1-1.06 0l-1.75-1.75a.75.75 0 0 1 1.06-1.06l1.22 1.22 3.22-3.22a.75.75 0 0 1 1.06 1.06z" />
-                              </svg>
-                            ) : null}
-                          </span>
-                          <s-text>{tag}</s-text>
-                        </s-stack>
-                      </s-clickable>
+                      <s-box padding="small">
+                        <s-checkbox
+                          label={tag}
+                          checked={isSelected}
+                          onChange={() => onToggleReportTag(tag)}
+                        />
+                      </s-box>
                     </div>
                   );
                 })
@@ -1101,15 +1157,11 @@ async function loadReportTagsFromDraftOrders(
   rawQuery?: string,
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
-  const searchQuery =
-    query.length > 0
-      ? query
-          .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean)
-          .map((token) => `tag:${escapeSearchToken(token)}*`)
-          .join(" AND ")
-      : "";
+  const searchQuery = buildTagSearchQuery(query);
+
+  if (query.length > 0 && !searchQuery) {
+    return { tags: [] };
+  }
 
   const tagCounts = new Map<string, number>();
   let after: string | null = null;
@@ -1183,15 +1235,11 @@ async function loadReportTagsFromOrders(
   rawQuery?: string,
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
-  const searchQuery =
-    query.length > 0
-      ? query
-          .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean)
-          .map((token) => `tag:${escapeSearchToken(token)}*`)
-          .join(" AND ")
-      : "";
+  const searchQuery = buildTagSearchQuery(query);
+
+  if (query.length > 0 && !searchQuery) {
+    return { tags: [] };
+  }
 
   const tagCounts = new Map<string, number>();
   let after: string | null = null;
@@ -1464,6 +1512,15 @@ function escapeSearchValue(value: string): string {
 
 function escapeSearchToken(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/([:\\()])/g, "\\$1");
+}
+
+function buildTagSearchQuery(query: string): string {
+  return query
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => /[A-Za-z0-9]/.test(token))
+    .map((token) => `tag:${escapeSearchToken(token)}*`)
+    .join(" AND ");
 }
 
 function rankTagListByPrefix(query: string, tags: string[], max: number): string[] {

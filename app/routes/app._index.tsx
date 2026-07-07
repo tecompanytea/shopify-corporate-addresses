@@ -297,29 +297,6 @@ const CUSTOMER_PICKER_STYLES = `
   fill: currentColor;
 }
 
-.order-tag-picker__checkbox {
-  width: 16px;
-  height: 16px;
-  border: 1px solid var(--p-color-border, #d1d5db);
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-.order-tag-picker__checkbox--checked {
-  border-color: var(--p-color-bg-fill-emphasis, #111827);
-  background: var(--p-color-bg-fill-emphasis, #111827);
-  color: var(--p-color-text-on-fill, #fff);
-}
-
-.order-tag-picker__checkbox svg {
-  width: 12px;
-  height: 12px;
-  display: block;
-  fill: currentColor;
-}
 `;
 
 const ORDER_CREATE_MUTATION = `#graphql
@@ -1726,6 +1703,7 @@ export default function Index() {
         createPortal(
           <div
             ref={customerMenuRef}
+            role="presentation"
             className="customer-picker__menu"
             style={{
               top: `${customerMenuRect.top}px`,
@@ -1813,6 +1791,7 @@ export default function Index() {
         createPortal(
           <div
             ref={orderTagMenuRef}
+            role="presentation"
             className="order-tag-picker__menu"
             style={{
               top: `${orderTagMenuRect.top}px`,
@@ -1869,21 +1848,13 @@ export default function Index() {
                   );
                   return (
                     <div key={tag} data-order-tag-row="true">
-                      <s-clickable onClick={() => onToggleOrderTag(tag)} padding="small">
-                        <s-stack direction="inline" gap="small">
-                          <span
-                            className={`order-tag-picker__checkbox${isSelected ? " order-tag-picker__checkbox--checked" : ""}`}
-                            aria-hidden="true"
-                          >
-                            {isSelected ? (
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-                                <path d="M6.53 10.78a.75.75 0 0 1-1.06 0l-1.75-1.75a.75.75 0 0 1 1.06-1.06l1.22 1.22 3.22-3.22a.75.75 0 0 1 1.06 1.06z" />
-                              </svg>
-                            ) : null}
-                          </span>
-                          <s-text>{tag}</s-text>
-                        </s-stack>
-                      </s-clickable>
+                      <s-box padding="small">
+                        <s-checkbox
+                          label={tag}
+                          checked={isSelected}
+                          onChange={() => onToggleOrderTag(tag)}
+                        />
+                      </s-box>
                     </div>
                   );
                 })
@@ -2660,15 +2631,11 @@ async function loadOrderTagsFromDraftOrders(
   rawQuery?: string,
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
-  const searchQuery =
-    query.length > 0
-      ? query
-          .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean)
-          .map((token) => `tag:${escapeSearchToken(token)}*`)
-          .join(" AND ")
-      : "";
+  const searchQuery = buildTagSearchQuery(query);
+
+  if (query.length > 0 && !searchQuery) {
+    return { tags: [] };
+  }
 
   const tagCounts = new Map<string, number>();
   let after: string | null = null;
@@ -2742,15 +2709,11 @@ async function loadOrderTagsFromOrders(
   rawQuery?: string,
 ): Promise<{ tags: string[]; error?: string }> {
   const query = rawQuery?.trim() || "";
-  const searchQuery =
-    query.length > 0
-      ? query
-          .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean)
-          .map((token) => `tag:${escapeSearchToken(token)}*`)
-          .join(" AND ")
-      : "";
+  const searchQuery = buildTagSearchQuery(query);
+
+  if (query.length > 0 && !searchQuery) {
+    return { tags: [] };
+  }
 
   const tagCounts = new Map<string, number>();
   let after: string | null = null;
@@ -3025,6 +2988,15 @@ function escapeSearchValue(value: string): string {
 
 function escapeSearchToken(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/([:\\()])/g, "\\$1");
+}
+
+function buildTagSearchQuery(query: string): string {
+  return query
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => /[A-Za-z0-9]/.test(token))
+    .map((token) => `tag:${escapeSearchToken(token)}*`)
+    .join(" AND ");
 }
 
 function mergeCustomerOptions(customers: CustomerOption[]): CustomerOption[] {
