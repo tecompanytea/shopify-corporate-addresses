@@ -1085,7 +1085,7 @@ export default function Index() {
   };
 
   const previewRows = useMemo(
-    () => parseResult?.previewRows.slice(0, 5) ?? [],
+    () => parseResult?.previewRows ?? [],
     [parseResult],
   );
 
